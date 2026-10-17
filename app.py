@@ -3,12 +3,59 @@ import random
 import re
 from itertools import combinations
 from collections import defaultdict, Counter
+import math
 import pandas as pd
 
 st.set_page_config(
     page_title="Mega-Sena - Laboratório & Fechamentos",
     page_icon="🍀",
     layout="wide"
+)
+
+# ==============================================================================
+# CSS GLOBAL: FORÇAR TODAS AS ESCRITAS E RESULTADOS EM PRETO (#000000)
+# ==============================================================================
+st.markdown(
+    """
+    <style>
+        /* Força cor preta absoluta em textos, títulos, rótulos e elementos da interface */
+        html, body, [class*="css"], .stMarkdown, p, span, label, div, h1, h2, h3, h4, h5, h6,
+        .stMetricValue, .stMetricLabel, code, pre, .stCodeBlock, [data-testid="stMarkdownContainer"] p {
+            color: #000000 !important;
+        }
+        
+        /* Blocos de código e resultados */
+        code, pre, .stCodeBlock {
+            background-color: #f0f2f6 !important;
+            color: #000000 !important;
+            font-weight: 700 !important;
+            border: 1px solid #cccccc !important;
+        }
+        
+        /* Campos de digitação e seleção */
+        input, textarea, select, .stTextInput input, .stTextArea textarea {
+            color: #000000 !important;
+            background-color: #ffffff !important;
+            font-weight: 600 !important;
+        }
+        
+        /* Células da tabela */
+        .dataframe, .dataframe td, .dataframe th {
+            color: #000000 !important;
+        }
+
+        /* Destaque no volante visual */
+        .v-cell {
+            color: #000000 !important;
+            font-weight: 600 !important;
+        }
+        .v-marcada {
+            color: #ffffff !important;
+            font-weight: 800 !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 # ==============================================================================
@@ -36,10 +83,9 @@ HISTORICO_50_MEGASENA = [
 
 TOTAL_NUMS = 60
 TAMANHO_JOGO = 6
-QTD_LINHAS = 6
 
 # ==============================================================================
-# 2. MAPEAMENTO MATEMÁTICO DA MATRIZ 6x10 (MEGA-SENA)
+# 2. MAPEAMENTO DA MATRIZ 6x10
 # ==============================================================================
 @st.cache_data
 def get_primos_megasena():
@@ -56,7 +102,6 @@ def get_moldura_megasena():
 
 @st.cache_data
 def get_diagonais_direita_megasena():
-    """10 diagonais cilíndricas (+11 mod 10) de 6 dezenas cada"""
     return {
         f"Diag Direita {c+1:02d}": sorted([(r * 10) + ((c + r) % 10) + 1 for r in range(6)])
         for c in range(10)
@@ -64,7 +109,6 @@ def get_diagonais_direita_megasena():
 
 @st.cache_data
 def get_diagonais_esquerda_megasena():
-    """10 diagonais cilíndricas (+9 mod 10) de 6 dezenas cada"""
     return {
         f"Diag Esquerda {c+1:02d}": sorted([(r * 10) + ((c - r) % 10) + 1 for r in range(6)])
         for c in range(10)
@@ -88,7 +132,7 @@ def construir_todos_grupos():
     return grupos
 
 # ==============================================================================
-# 3. MOTOR ESTATÍSTICO & FUNIL DE ELLIOTT (60 DEZENAS)
+# 3. MOTOR ESTATÍSTICO & FUNIL DE ELLIOTT
 # ==============================================================================
 def contar_consecutivos(jogo):
     maior = seq = 1
@@ -102,9 +146,13 @@ def contar_consecutivos(jogo):
 
 def calcular_funil_elliott(historico_fatia):
     total_jogos = len(historico_fatia)
-    metade = max(1, total_jogos // 2)
-    jogos_antigos = historico_fatia[:metade]
-    jogos_recentes = historico_fatia[metade:]
+    if total_jogos <= 1:
+        jogos_antigos = historico_fatia
+        jogos_recentes = historico_fatia
+    else:
+        metade = max(1, total_jogos // 2)
+        jogos_antigos = historico_fatia[:metade]
+        jogos_recentes = historico_fatia[metade:]
     
     cnt_antigos = Counter()
     for s in jogos_antigos: cnt_antigos.update(s)
@@ -130,7 +178,7 @@ def calcular_funil_elliott(historico_fatia):
             atraso += 1
 
         momentum = f_rec - f_ant
-        pts_momentum = momentum * 2.5
+        pts_momentum = momentum * 2.0
 
         pts_fibonacci = 0.0
         if atraso in [1, 2]:
@@ -143,7 +191,7 @@ def calcular_funil_elliott(historico_fatia):
             pts_fibonacci = -3.0
 
         pts_exaustao = 0.0
-        if f_rec >= 4 and len(jogos_recentes) <= 10:
+        if f_rec >= 4 and len(jogos_recentes) <= 8:
             pts_exaustao = -3.5
 
         score_final = (f_tot * 1.5) + pts_momentum + pts_fibonacci + pts_exaustao
@@ -226,20 +274,20 @@ if "jogos_fechamento" not in st.session_state: st.session_state.jogos_fechamento
 if "jogos_fechamento_filtrados" not in st.session_state: st.session_state.jogos_fechamento_filtrados = []
 
 # ==============================================================================
-# 5. BARRA LATERAL: CONTROLE DINÂMICO
+# 5. BARRA LATERAL: SELETOR DE 1 A 30 CONCURSOS
 # ==============================================================================
 with st.sidebar:
     st.header("Janela Estatística")
-    total_disponivel = len(st.session_state.historico_sorteios)
     
     qtd_analise = st.slider(
-        "Quantidade de Concursos:",
-        min_value=5,
-        max_value=total_disponivel,
-        value=min(30, total_disponivel),
-        step=1
+        "Quantidade de Concursos para Filtros:",
+        min_value=1,
+        max_value=30,
+        value=15,
+        step=1,
+        help="Escolha livremente de 1 a 30 concursos para calcular as estatísticas e calibrar os filtros dinamicamente."
     )
-    st.caption(f"Analisando os últimos {qtd_analise} sorteios.")
+    st.caption(f"Analisando estritamente os últimos **{qtd_analise}** sorteios.")
     auto_sinc = st.checkbox("Sincronizar Filtros Automaticamente", value=True)
 
     with st.expander("Inserir Concurso Manual"):
@@ -288,7 +336,7 @@ if "regras_ativas" not in st.session_state:
     st.session_state.regras_ativas = regras
 
 # ==============================================================================
-# 6. COMBINATÓRIA E UTILITÁRIOS (6 DEZENAS)
+# 6. COMBINATÓRIA OTIMIZADA (7 A 60 DEZENAS)
 # ==============================================================================
 def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_consec,
                  f_rep, r_rep, ult_set, f_coinc, max_c, hist_sets,
@@ -316,14 +364,35 @@ def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_
 
 def gerar_fechamento_guloso(dezenas, garantia):
     nums = sorted(dezenas)
+    n = len(nums)
+    
+    # 1. Caso Garantia Sena (100% Fechado)
     if "Sena" in garantia:
+        total_comb = math.comb(n, 6)
+        if total_comb > 3500:
+            return None, f"A combinação 100% fechada de {n} dezenas geraria {total_comb:,} apostas, excedendo a memória do servidor. Reduza as dezenas ou escolha Quadra/Quina."
         escolhidos = [sorted(list(c)) for c in combinations(nums, 6)]
         return escolhidos, 100.0
 
+    # 2. Fechamentos Económicos (Quina, Quadra, Terno)
     k_alvo = 5 if "Quina" in garantia else (4 if "Quadra" in garantia else 3)
+    
+    # Se a quantidade de números for muito alta, aplicamos amostragem heurística para manter a estabilidade
+    if n > 24 and k_alvo >= 4:
+        st.warning(f"Processando matriz extensa ({n} dezenas). Gerando cobertura probabilística equilibrada...")
+        amostra_cands = set()
+        random.seed(42)
+        tentativas = 0
+        while len(amostra_cands) < 5000 and tentativas < 25000:
+            c = tuple(sorted(random.sample(nums, 6)))
+            amostra_cands.add(c)
+            tentativas += 1
+        candidatos = list(amostra_cands)
+    else:
+        candidatos = list(combinations(nums, 6))
+
     alvos_totais = set(combinations(nums, k_alvo))
     total_alvos = len(alvos_totais)
-    candidatos = list(combinations(nums, 6))
     if not candidatos: return [], 0.0
 
     cand_alvos = {c: set(combinations(c, k_alvo)) for c in candidatos}
@@ -376,22 +445,19 @@ def ler_arquivo_jogos_txt(conteudo_texto):
 def renderizar_volante_6x10(jogo, titulo=""):
     marcadas = set(jogo)
     grid_html = f"""
-    <style>
-        .volante-box {{ background:#ffffff; border:2px solid #1b5e20; border-radius:10px; padding:14px; width:fit-content; margin:8px auto; }}
-        .volante-grid {{ display:grid; grid-template-columns:repeat(10, 36px); gap:5px; }}
-        .v-cell {{ width:36px; height:36px; border:1px solid #dcdcdc; border-radius:6px; display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:12px; color:#555; background:#fafafa; font-weight:500; }}
-        .v-marcada {{ background:linear-gradient(135deg, #2e7d32, #1b5e20) !important; color:#ffffff !important; border:2px solid #0b4317 !important; font-weight:bold; }}
-    </style>
-    <div class="volante-box">
+    <div style="background:#ffffff; border:2px solid #000000; border-radius:8px; padding:12px; width:fit-content; margin:8px auto;">
     """
     if titulo:
-        grid_html += f"<p style='font-weight:700; font-size:15px; margin-bottom:10px; color:#1b5e20; text-align:center;'>{titulo}</p>"
-    grid_html += '<div class="volante-grid">'
+        grid_html += f"<p style='font-weight:bold; font-size:15px; margin-bottom:8px; color:#000000; text-align:center;'>{titulo}</p>"
+    grid_html += '<div style="display:grid; grid-template-columns:repeat(10, 36px); gap:4px;">'
     for r in range(6):
         for c in range(10):
             num = r * 10 + c + 1
-            cls = "v-cell v-marcada" if num in marcadas else "v-cell"
-            grid_html += f'<div class="{cls}">{num:02d}</div>'
+            if num in marcadas:
+                style = "width:36px; height:36px; border:2px solid #000000; border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:12px; font-weight:bold; background:#000000; color:#ffffff;"
+            else:
+                style = "width:36px; height:36px; border:1px solid #bbbbbb; border-radius:4px; display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:12px; background:#f9f9f9; color:#000000;"
+            grid_html += f'<div style="{style}">{num:02d}</div>'
     grid_html += "</div></div>"
     st.markdown(grid_html, unsafe_allow_html=True)
 
@@ -399,12 +465,12 @@ def renderizar_volante_6x10(jogo, titulo=""):
 # 7. INTERFACE PRINCIPAL
 # ==============================================================================
 st.title("🍀 Mega-Sena: Laboratório & Fechamentos")
-st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos • Matriz 6x10 • Funil de Elliott.")
+st.caption(f"Filtros Baseados nos Últimos **{qtd_analise}** Concursos • Janela Ajustável (01 a 30) • Matriz 6x10.")
 
 tab_fechamento, tab_gerador, tab_conferir, tab_filtros, tab_hist, tab_volante = st.tabs([
-    "🎯 Fechamentos & Funil",
+    "🎯 Fechamentos (7 a 60)",
     "🚀 Gerador de Apostas",
-    "🎟️ Conferir Jogos (TXT)",
+    "🎟️ Conferir Jogos (.TXT)",
     "⚙️ Filtros & Estatísticas",
     f"📜 Concursos ({qtd_analise}) & Diagonais",
     "🗺️ Volante Visual 6x10"
@@ -416,11 +482,11 @@ diag_dir = [f"Diag Direita {i:02d}" for i in range(1, 11)]
 diag_esq = [f"Diag Esquerda {i:02d}" for i in range(1, 11)]
 
 # ==============================================================================
-# ABA: FECHAMENTO & FUNIL DE ELLIOTT
+# ABA: FECHAMENTO (DE 7 A 60 DEZENAS)
 # ==============================================================================
 with tab_fechamento:
     st.subheader(f"1. Frequência das 60 Dezenas (Últimos {qtd_analise} Concursos)")
-    st.caption("Quantidade de saídas em texto limpo:")
+    st.caption("Quantidade de saídas em texto preto direto:")
 
     linhas_texto = []
     for r in range(6):
@@ -433,27 +499,20 @@ with tab_fechamento:
     st.text("\n".join(linhas_texto))
 
     st.divider()
-    st.subheader("2. As 20 Dezenas Ranqueadas pelo Funil de Elliott")
-    st.caption("Calculadas via aceleração de onda (Momentum), retração de Fibonacci e descarte de exaustão:")
-
+    st.subheader("2. Sugestão Inicial: 20 Dezenas do Funil de Elliott")
     str_sugestao_20 = " ".join([f"{n:02d}" for n in top20_elliott])
     st.code(f"Top 20 Elliott: {str_sugestao_20}")
 
-    with st.expander("Ver Detalhes do Score do Funil"):
-        df_funil = pd.DataFrame(lista_funil_detalhada[:20])
-        df_funil.columns = ["Dezena", "Score Funil", "Total Saídas", "Saídas Recentes", "Momentum", "Atraso"]
-        st.dataframe(df_funil, use_container_width=True)
-
     st.divider()
-    st.subheader("3. Escolha das Dezenas do Fechamento (Editável)")
-    st.caption("As 20 dezenas do funil já estão preenchidas abaixo. Modifique, adicione ou remova mantendo entre 7 e 20 números:")
+    st.subheader("3. Escolha das Dezenas a Combinar (De 7 a 60 Dezenas)")
+    st.caption("Digite ou edite livremente as dezenas desejadas separadas por espaço (de 7 até 60 números):")
 
     c_fech1, c_fech2 = st.columns([3, 1])
     with c_fech1:
         entrada_manual = st.text_input(
-            "Dezenas Selecionadas:",
+            "Suas Dezenas a Combinar:",
             value=str_sugestao_20,
-            help="Altere os números livremente respeitando o intervalo de 7 a 20 dezenas."
+            help="Digite de 7 a 60 números entre 01 e 60."
         )
     with c_fech2:
         gar = st.selectbox(
@@ -461,33 +520,36 @@ with tab_fechamento:
             [
                 "Quadra (Garante 4 se 6)",
                 "Quina (Garante 5 se 6)",
-                "Sena (Garante 6 se 6 - 100% Fechado)",
-                "Terno (Garante 3 se 6)"
+                "Terno (Garante 3 se 6)",
+                "Sena (Garante 6 se 6 - 100% Fechado)"
             ]
         )
 
     dezenas_digitadas = extrair_dezenas_texto(entrada_manual)
-    st.write(f"Dezenas selecionadas ({len(dezenas_digitadas)}): `{' - '.join([f'{n:02d}' for n in dezenas_digitadas])}`")
+    st.write(f"Dezenas selecionadas no momento (**{len(dezenas_digitadas)}**): `{' - '.join([f'{n:02d}' for n in dezenas_digitadas])}`")
 
     if len(dezenas_digitadas) < 7:
         st.info("Digite pelo menos 7 dezenas para calcular o fechamento.")
-    elif len(dezenas_digitadas) > 20:
-        st.error(f"Você informou {len(dezenas_digitadas)} dezenas. O limite máximo é 20.")
+    elif len(dezenas_digitadas) > 60:
+        st.error("O limite máximo permitido na Mega-Sena é de 60 dezenas.")
     else:
         if st.button("Calcular Desdobramento Fechado 🧮", use_container_width=True):
-            with st.spinner("Processando combinações da Mega-Sena..."):
+            with st.spinner("Processando combinações..."):
                 j_fech, cob = gerar_fechamento_guloso(dezenas_digitadas, gar)
-                st.session_state.jogos_fechamento = j_fech
-                st.session_state.taxa_cobertura = cob
-                st.session_state.jogos_fechamento_filtrados = []
+                if j_fech is None:
+                    st.error(cob)
+                else:
+                    st.session_state.jogos_fechamento = j_fech
+                    st.session_state.taxa_cobertura = cob
+                    st.session_state.jogos_fechamento_filtrados = []
 
     if st.session_state.jogos_fechamento:
         qtd_bruta = len(st.session_state.jogos_fechamento)
-        st.success(f"Fechamento Bruto: **{qtd_bruta} jogos gerados** (Garantia: {st.session_state.get('taxa_cobertura', 100):.1f}%)")
+        st.success(f"Fechamento Calculado: **{qtd_bruta} apostas geradas** (Garantia: {st.session_state.get('taxa_cobertura', 100):.1f}%)")
 
         st.divider()
         st.subheader("4. Depuração e Redução por Filtros Ativos")
-        st.caption("Passe as apostas geradas pelos filtros da aba '⚙️ Filtros & Estatísticas' para descartar jogos improváveis:")
+        st.caption("Passe as apostas geradas pelos filtros da aba '⚙️ Filtros & Estatísticas' para descartar combinações improváveis:")
 
         if st.button("Depurar e Reduzir Jogos com Filtros Ativos 🧹", use_container_width=True):
             regras_comp = [(frozenset(st.session_state.grupos_base[k]), v["min"], v["max"]) for k, v in st.session_state.regras_ativas.items() if v["ativo"]]
@@ -509,14 +571,14 @@ with tab_fechamento:
             if jogos_depurados:
                 qtd_dep = len(jogos_depurados)
                 reducao = ((qtd_bruta - qtd_dep) / qtd_bruta) * 100
-                st.success(f"🎉 Depuração Concluída! De **{qtd_bruta}** apostas brutas, restaram **{qtd_dep} jogos aprovados** (Redução de **{reducao:.1f}%** no custo).")
+                st.success(f"Depuração Concluída: De **{qtd_bruta}** apostas brutas, restaram **{qtd_dep} jogos aprovados** (Redução de **{reducao:.1f}%** no custo).")
             else:
-                st.error("Nenhum jogo do fechamento passou em todos os filtros. Alivie algumas regras na aba de Filtros.")
+                st.error("Nenhum jogo passou em todos os filtros simultaneamente. Alivie algumas regras na aba de Filtros.")
 
         if st.session_state.jogos_fechamento_filtrados:
-            st.write(f"### 📋 Apostas Depuradas Prontas ({len(st.session_state.jogos_fechamento_filtrados)} jogos):")
+            st.write(f"### Apostas Depuradas e Aprovadas ({len(st.session_state.jogos_fechamento_filtrados)} jogos):")
             st.download_button(
-                "📥 Baixar Jogos Depurados em TXT",
+                "Baixar Jogos Depurados em TXT",
                 data=converter_para_txt(st.session_state.jogos_fechamento_filtrados),
                 file_name="megasena_fechamento_depurado.txt",
                 mime="text/plain",
@@ -527,7 +589,7 @@ with tab_fechamento:
 
         with st.expander(f"Ver lista completa do Fechamento Bruto ({qtd_bruta} apostas)"):
             st.download_button(
-                "📥 Baixar Fechamento Bruto (.TXT)",
+                "Baixar Fechamento Bruto (.TXT)",
                 data=converter_para_txt(st.session_state.jogos_fechamento),
                 file_name="megasena_fechamento_bruto.txt",
                 mime="text/plain"
@@ -540,14 +602,14 @@ with tab_fechamento:
 # ==============================================================================
 with tab_gerador:
     st.subheader("Gerar Combinações Validadas (6 Dezenas)")
-    qtd = st.number_input("Quantidade de Jogos:", min_value=1, max_value=200, value=5)
+    qtd = st.number_input("Quantidade de Jogos Desejada:", min_value=1, max_value=200, value=5)
     
     if st.button("Gerar Apostas da Mega-Sena 🚀", use_container_width=True):
         regras_comp = [(frozenset(st.session_state.grupos_base[k]), v["min"], v["max"]) for k, v in st.session_state.regras_ativas.items() if v["ativo"]]
         jogos, unicos, t = [], set(), 0
         pool = list(range(1, 61))
         
-        with st.spinner("Filtrando apostas segundo as regras..."):
+        with st.spinner("Filtrando apostas..."):
             while len(jogos) < qtd and t < 250_000:
                 c = sorted(random.sample(pool, 6))
                 ctup = tuple(c)
@@ -565,10 +627,10 @@ with tab_gerador:
                 
         st.session_state.jogos_aleatorios = jogos
         if not jogos:
-            st.error("Nenhum jogo passou pelos critérios configurados. Alivie alguns filtros na aba de Filtros.")
+            st.error("Nenhum jogo cumpriu todos os critérios. Alivie algumas restrições na aba de Filtros.")
 
     if st.session_state.jogos_aleatorios:
-        st.success(f"{len(st.session_state.jogos_aleatorios)} jogos gerados:")
+        st.success(f"{len(st.session_state.jogos_aleatorios)} apostas geradas:")
         st.download_button(
             "Baixar Jogos em TXT",
             data=converter_para_txt(st.session_state.jogos_aleatorios),
@@ -583,7 +645,7 @@ with tab_gerador:
 # ABA: CONFERIR JOGOS (ARQUIVO .TXT)
 # ==============================================================================
 with tab_conferir:
-    st.subheader("Conferência Oficial da Mega-Sena (.TXT)")
+    st.subheader("Conferência de Apostas da Mega-Sena (.TXT)")
     
     col_res1, col_res2 = st.columns([2, 1])
     with col_res1:
@@ -612,7 +674,7 @@ with tab_conferir:
         else:
             st.error("Nenhuma aposta válida de 6 dezenas encontrada no arquivo.")
     else:
-        st.caption("Ou confira apostas geradas na memória desta sessão:")
+        st.caption("Ou utilize apostas geradas na memória desta sessão:")
         opcao_sessao = st.selectbox(
             "Usar da memória:",
             [
@@ -649,10 +711,10 @@ with tab_conferir:
         resultados_processados.sort(key=lambda x: x["qtd_acertos"], reverse=True)
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("🏆 SENA (6)", contadores[6])
-        m2.metric("🎯 QUINA (5)", contadores[5])
-        m3.metric("🥈 QUADRA (4)", contadores[4])
-        m4.metric("❌ SEM PRÊMIO", contadores[0] + contadores[1] + contadores[2] + contadores[3])
+        m1.metric("SENA (6)", contadores[6])
+        m2.metric("QUINA (5)", contadores[5])
+        m3.metric("QUADRA (4)", contadores[4])
+        m4.metric("SEM PRÊMIO", contadores[0] + contadores[1] + contadores[2] + contadores[3])
 
         st.divider()
         for idx, item in enumerate(resultados_processados):
@@ -661,9 +723,9 @@ with tab_conferir:
                 continue
 
             tag = f"{qtd} acertos"
-            if qtd == 6: tag = "🏆 SENA! PARABÉNS!"
-            elif qtd == 5: tag = "🎯 QUINA!"
-            elif qtd == 4: tag = "🥈 QUADRA!"
+            if qtd == 6: tag = "SENA!"
+            elif qtd == 5: tag = "QUINA!"
+            elif qtd == 4: tag = "QUADRA!"
 
             jogo_str = " ".join([f"[{n:02d}]" if n in item["acertos"] else f"{n:02d}" for n in item["jogo"]])
             st.write(f"Bilhete #{idx+1:02d}: {jogo_str} — **{tag}**")
@@ -672,7 +734,7 @@ with tab_conferir:
 # ABA: FILTROS & ESTATÍSTICAS
 # ==============================================================================
 with tab_filtros:
-    st.subheader(f"Filtros Calibrados nos Últimos {qtd_analise} Concursos (Mega-Sena)")
+    st.subheader(f"Filtros Calibrados nos Últimos {qtd_analise} Concursos")
     
     c1, c2 = st.columns(2)
     with c1:
