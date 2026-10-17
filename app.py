@@ -256,7 +256,7 @@ def calcular_estatisticas_dinamicas(historico_fatia, grupos_base):
     }
 
 # ==============================================================================
-# 4. INICIALIZAÇÃO DE ESTADO
+# 4. INICIALIZAÇÃO DE ESTADO ROBUSTA (CONFIGURADA UMA ÚNICA VEZ)
 # ==============================================================================
 if "grupos_base" not in st.session_state:
     st.session_state.grupos_base = construir_todos_grupos()
@@ -267,26 +267,59 @@ if "historico_sorteios" not in st.session_state:
 if "qtd_analise" not in st.session_state:
     st.session_state.qtd_analise = 15
 
+# Inicialização dos Filtros Gerais (apenas na primeira carga)
+if "filtros_iniciados" not in st.session_state:
+    st.session_state.filtros_iniciados = True
+    
+    st.session_state.filtro_soma_ativo = True
+    st.session_state.faixa_soma = (120, 260)
+    
+    st.session_state.filtro_consec_ativo = True
+    st.session_state.max_consec = 2
+    
+    st.session_state.f_rep_ant_ativo = True
+    st.session_state.rep_ant_faixa = (0, 1)
+    
+    st.session_state.f_max_coinc_ativo = True
+    st.session_state.max_coinc_30 = 3
+    
+    st.session_state.f_freq_30_ativo = True
+    st.session_state.faixa_quentes = (1, 4)
+    st.session_state.faixa_frias = (0, 2)
+    
+    # Padrões da Matriz
+    st.session_state.regras_padroes = {
+        "Pares": {"ativo": True, "faixa": (2, 4)},
+        "Primos": {"ativo": True, "faixa": (1, 3)},
+        "Moldura": {"ativo": True, "faixa": (1, 4)},
+        "Centro (Miolo)": {"ativo": False, "faixa": (2, 5)}
+    }
+    
+    # 20 Diagonais (10 Direitas e 10 Esquerdas)
+    st.session_state.regras_diagonais = {}
+    for i in range(1, 11):
+        st.session_state.regras_diagonais[f"Diag Direita {i:02d}"] = {"ativo": False, "faixa": (0, 2)}
+        st.session_state.regras_diagonais[f"Diag Esquerda {i:02d}"] = {"ativo": False, "faixa": (0, 2)}
+
 if "jogos_aleatorios" not in st.session_state: st.session_state.jogos_aleatorios = []
 if "jogos_fechamento" not in st.session_state: st.session_state.jogos_fechamento = []
 if "jogos_fechamento_filtrados" not in st.session_state: st.session_state.jogos_fechamento_filtrados = []
 
 # ==============================================================================
-# 5. CONTROLE DE JANELA DE 01 A 30 CONCURSOS
+# 5. CONTROLE DA JANELA (01 A 30 CONCURSOS)
 # ==============================================================================
 with st.sidebar:
     st.header("Janela dos Filtros")
     qtd_selecionada = st.slider(
-        "Quantidade de Concursos (do último até 30 atrás):",
+        "Quantidade de Concursos:",
         min_value=1,
         max_value=30,
         value=st.session_state.qtd_analise,
         step=1,
-        key="slider_sidebar_qtd"
+        help="Ajuste livremente de 1 até 30 concursos para calcular o histórico."
     )
     st.session_state.qtd_analise = qtd_selecionada
-    st.caption(f"Analisando do último concurso até **{st.session_state.qtd_analise}** concursos anteriores.")
-    auto_sinc = st.checkbox("Sincronizar Filtros Automaticamente", value=True)
+    st.caption(f"Estatísticas calculadas nos últimos **{st.session_state.qtd_analise}** concursos.")
 
     with st.expander("Inserir Concurso Manual"):
         novo_jogo_txt = st.text_input("6 Dezenas (ex: 04 15 28 35 44 58):")
@@ -303,38 +336,19 @@ historico_ativo = st.session_state.historico_sorteios[-st.session_state.qtd_anal
 stats = calcular_estatisticas_dinamicas(historico_ativo, st.session_state.grupos_base)
 top20_elliott, lista_funil_detalhada = calcular_funil_elliott(historico_ativo)
 
-if "qtd_analise_ant" not in st.session_state or st.session_state.qtd_analise_ant != st.session_state.qtd_analise:
-    st.session_state.qtd_analise_ant = st.session_state.qtd_analise
-    if auto_sinc:
-        st.session_state.filtro_soma_ativo = True
-        st.session_state.faixa_soma = (int(stats["min_soma"]), int(stats["max_soma"]))
-        st.session_state.filtro_consec_ativo = True
-        st.session_state.max_consec = int(stats["max_consec"])
-        st.session_state.f_rep_ant_ativo = True
-        st.session_state.rep_ant_faixa = (int(stats["min_rep"]), int(stats["max_rep"]))
-        st.session_state.f_max_coinc_ativo = True
-        st.session_state.max_coinc_30 = 3
-        st.session_state.f_freq_30_ativo = True
-        st.session_state.faixa_quentes = (1, 4)
-        st.session_state.faixa_frias = (0, 2)
-
-        regras = {}
-        for k, v in stats["stats_grupos"].items():
-            regras[k] = {"ativo": False, "min": int(v["min"]), "max": int(v["max"])}
-        for padrao in ["Pares", "Primos", "Moldura"]:
-            regras[padrao]["ativo"] = True
-        st.session_state.regras_ativas = regras
-
-if "regras_ativas" not in st.session_state:
-    regras = {}
-    for k, v in stats["stats_grupos"].items():
-        regras[k] = {"ativo": False, "min": int(v["min"]), "max": int(v["max"])}
-    for padrao in ["Pares", "Primos", "Moldura"]:
-        regras[padrao]["ativo"] = True
-    st.session_state.regras_ativas = regras
+def carregar_sugestoes_estatisticas():
+    st.session_state.faixa_soma = (int(stats["min_soma"]), int(stats["max_soma"]))
+    st.session_state.max_consec = int(stats["max_consec"])
+    st.session_state.rep_ant_faixa = (int(stats["min_rep"]), int(stats["max_rep"]))
+    for padrao in st.session_state.regras_padroes:
+        s_g = stats["stats_grupos"][padrao]
+        st.session_state.regras_padroes[padrao]["faixa"] = (int(s_g["min"]), int(s_g["max"]))
+    for k in st.session_state.regras_diagonais:
+        s_d = stats["stats_grupos"][k]
+        st.session_state.regras_diagonais[k]["faixa"] = (int(s_d["min"]), int(s_d["max"]))
 
 # ==============================================================================
-# 6. COMBINATÓRIA OTIMIZADA (7 A 60 DEZENAS)
+# 6. COMBINATÓRIA E UTILITÁRIOS
 # ==============================================================================
 def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_consec,
                  f_rep, r_rep, ult_set, f_coinc, max_c, hist_sets,
@@ -463,7 +477,7 @@ st.title("🍀 Mega-Sena: Laboratório & Fechamentos")
 st.caption(f"Filtros Baseados nos Últimos **{st.session_state.qtd_analise}** Concursos • Janela de 01 a 30 Sorteios • Matriz 6x10.")
 
 tab_filtros, tab_fechamento, tab_gerador, tab_conferir, tab_hist, tab_volante = st.tabs([
-    "⚙️ Filtros & Estatísticas",
+    "⚙️ Filtros & Estatísticas (Mutável)",
     "🎯 Fechamentos (7 a 60)",
     "🚀 Gerador de Apostas",
     "🎟️ Conferir Jogos (.TXT)",
@@ -477,120 +491,158 @@ diag_dir = [f"Diag Direita {i:02d}" for i in range(1, 11)]
 diag_esq = [f"Diag Esquerda {i:02d}" for i in range(1, 11)]
 
 # ==============================================================================
-# ABA: FILTROS & ESTATÍSTICAS (COM CONTROLE DIRETO DE 1 A 30 CONCURSOS)
+# ABA: FILTROS & ESTATÍSTICAS (TOTALMENTE MUTÁVEL)
 # ==============================================================================
 with tab_filtros:
-    st.subheader("1. Janela Variável dos Filtros (01 a 30 Concursos)")
-    
-    col_janela1, col_janela2 = st.columns([3, 1])
-    with col_janela1:
-        nova_qtd = st.slider(
-            "Selecione a quantidade de concursos para alimentar os filtros:",
-            min_value=1,
-            max_value=30,
-            value=st.session_state.qtd_analise,
-            step=1,
-            key="slider_aba_filtros"
-        )
-        if nova_qtd != st.session_state.qtd_analise:
-            st.session_state.qtd_analise = nova_qtd
-            st.rerun()
-    with col_janela2:
-        st.write("")
-        st.write("")
-        if st.button("🔄 Recalibrar Agora", use_container_width=True):
-            st.session_state.qtd_analise_ant = None
+    col_topo1, col_topo2 = st.columns([3, 1])
+    with col_topo1:
+        st.subheader("1. Janela Estatística e Ajuste Manual dos Filtros")
+        st.caption(f"Estatísticas calculadas com os últimos **{st.session_state.qtd_analise}** concursos. Você pode alterar qualquer intervalo livremente:")
+    with col_topo2:
+        if st.button("⚡ Carregar Valores da Janela nos Filtros", use_container_width=True):
+            carregar_sugestoes_estatisticas()
+            st.success("Valores históricos carregados nos filtros!")
             st.rerun()
 
-    st.caption(f"Os limites abaixo são calculados estritamente sobre os últimos **{st.session_state.qtd_analise}** concursos.")
     st.divider()
 
+    # 1. PARÂMETROS GERAIS
     c1, c2 = st.columns(2)
     with c1:
         st.session_state.filtro_soma_ativo = st.checkbox("Filtrar por Soma das 6 Dezenas", value=st.session_state.filtro_soma_ativo)
-        st.caption(f"Janela de {st.session_state.qtd_analise}: Mín = {stats['min_soma']} | Máx = {stats['max_soma']} | Média = {stats['media_soma']:.1f}")
-        if st.session_state.filtro_soma_ativo:
-            st.session_state.faixa_soma = st.slider("Intervalo de Soma Permitido:", 21, 345, st.session_state.faixa_soma)
+        st.caption(f"Janela ({st.session_state.qtd_analise}): Mín = {stats['min_soma']} | Máx = {stats['max_soma']} | Média = {stats['media_soma']:.1f}")
+        st.session_state.faixa_soma = st.slider(
+            "Faixa de Soma:",
+            min_value=21,
+            max_value=345,
+            value=st.session_state.faixa_soma
+        )
     with c2:
         st.session_state.filtro_consec_ativo = st.checkbox("Limitar Números Consecutivos", value=st.session_state.filtro_consec_ativo)
-        st.caption(f"Janela de {st.session_state.qtd_analise}: Maior consecutivo observado foi **{stats['max_consec']}**")
-        if st.session_state.filtro_consec_ativo:
-            st.session_state.max_consec = st.slider("Máximo consecutivo permitido:", 1, 4, st.session_state.max_consec)
+        st.caption(f"Janela ({st.session_state.qtd_analise}): Maior consecutivo observado foi **{stats['max_consec']}**")
+        st.session_state.max_consec = st.slider(
+            "Máximo consecutivo permitido:",
+            min_value=1,
+            max_value=4,
+            value=st.session_state.max_consec
+        )
 
     st.divider()
-    st.subheader(f"2. Restrições Baseadas nos Últimos {st.session_state.qtd_analise} Concursos")
+    st.subheader(f"2. Restrições do Histórico ({st.session_state.qtd_analise} Concursos)")
     ch1, ch2, ch3 = st.columns(3)
     with ch1:
         st.session_state.f_rep_ant_ativo = st.checkbox("Repetição do Último Concurso", value=st.session_state.f_rep_ant_ativo)
-        st.caption(f"Faixa observada: {stats['min_rep']} a {stats['max_rep']} repetidas")
-        if st.session_state.f_rep_ant_ativo:
-            st.session_state.rep_ant_faixa = st.slider("Dezenas repetidas:", 0, 6, st.session_state.rep_ant_faixa)
-            st.caption(f"Último sorteio: `{sorted(list(ult_set))}`")
+        st.caption(f"Ocorrido: {stats['min_rep']} a {stats['max_rep']} repetidas | Último: `{sorted(list(ult_set))}`")
+        st.session_state.rep_ant_faixa = st.slider(
+            "Faixa de Dezenas Repetidas:",
+            min_value=0,
+            max_value=6,
+            value=st.session_state.rep_ant_faixa
+        )
     with ch2:
         st.session_state.f_max_coinc_ativo = st.checkbox("Teto de Coincidência Histórica", value=st.session_state.f_max_coinc_ativo)
-        st.caption("Evita combinações que repitam muitos acertos nos sorteios da janela.")
-        if st.session_state.f_max_coinc_ativo:
-            st.session_state.max_coinc_30 = st.slider("Máx. acertos repetidos:", 2, 4, st.session_state.max_coinc_30)
+        st.caption("Evita repetir combinações com muitos acertos nos concursos passados.")
+        st.session_state.max_coinc_30 = st.slider(
+            "Máx. acertos repetidos:",
+            min_value=2,
+            max_value=5,
+            value=st.session_state.max_coinc_30
+        )
     with ch3:
         st.session_state.f_freq_30_ativo = st.checkbox("Equilíbrio Quentes / Frias", value=st.session_state.f_freq_30_ativo)
-        st.caption("Proporção de dezenas quentes e frias da janela selecionada.")
-        if st.session_state.f_freq_30_ativo:
-            st.session_state.faixa_quentes = st.slider("Top Quentes:", 0, 6, st.session_state.faixa_quentes)
-            st.session_state.faixa_frias = st.slider("Mais Atrasadas:", 0, 6, st.session_state.faixa_frias)
+        st.caption("Proporção de dezenas quentes e frias da janela.")
+        st.session_state.faixa_quentes = st.slider("Top Quentes:", 0, 6, st.session_state.faixa_quentes)
+        st.session_state.faixa_frias = st.slider("Mais Atrasadas:", 0, 6, st.session_state.faixa_frias)
 
     st.divider()
-    st.subheader("3. Padrões Clássicos da Matriz (Mega-Sena)")
+    st.subheader("3. Padrões Clássicos da Matriz (Mutável)")
     for padrao in ["Pares", "Primos", "Moldura", "Centro (Miolo)"]:
         s_g = stats["stats_grupos"][padrao]
-        chk, sl = st.columns([2, 3])
-        with chk:
-            st.session_state.regras_ativas[padrao]["ativo"] = st.checkbox(
-                f"{padrao} (Mín: {s_g['min']} | Máx: {s_g['max']} | Méd: {s_g['media']:.1f})",
-                value=st.session_state.regras_ativas[padrao]["ativo"],
-                key=f"c_{padrao}"
+        col_chk, col_sl = st.columns([2, 3])
+        with col_chk:
+            st.session_state.regras_padroes[padrao]["ativo"] = st.checkbox(
+                f"{padrao} (Obs: Mín {s_g['min']} | Máx {s_g['max']} | Méd {s_g['media']:.1f})",
+                value=st.session_state.regras_padroes[padrao]["ativo"],
+                key=f"chk_padrao_{padrao}"
             )
-        with sl:
-            if st.session_state.regras_ativas[padrao]["ativo"]:
-                v = st.slider(f"Faixa {padrao}", 0, 6, (int(st.session_state.regras_ativas[padrao]["min"]), int(st.session_state.regras_ativas[padrao]["max"])), key=f"s_{padrao}")
-                st.session_state.regras_ativas[padrao]["min"], st.session_state.regras_ativas[padrao]["max"] = v
+        with col_sl:
+            st.session_state.regras_padroes[padrao]["faixa"] = st.slider(
+                f"Faixa {padrao}:",
+                min_value=0,
+                max_value=6,
+                value=st.session_state.regras_padroes[padrao]["faixa"],
+                key=f"sld_padrao_{padrao}"
+            )
 
     st.divider()
-    st.subheader(f"4. 20 Diagonais Cilíndricas (Calculadas nos {st.session_state.qtd_analise} Concursos)")
-    c_btn1, c_btn2 = st.columns(2)
-    with c_btn1:
+    st.subheader("4. 20 Diagonais Cilíndricas 6x10 (Intervalos 100% Mutáveis)")
+    st.caption("Altere a faixa de qualquer diagonal individualmente ou use os botões rápidos:")
+    
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    with col_btn1:
         if st.button("⚡ Ativar Todas as 20 Diagonais", use_container_width=True):
-            for i in range(1, 11):
-                st.session_state.regras_ativas[f"Diag Direita {i:02d}"]["ativo"] = True
-                st.session_state.regras_ativas[f"Diag Esquerda {i:02d}"]["ativo"] = True
+            for k in st.session_state.regras_diagonais:
+                st.session_state.regras_diagonais[k]["ativo"] = True
             st.rerun()
-    with c_btn2:
-        if st.button("🚫 Desativar Todas as Diagonais", use_container_width=True):
-            for i in range(1, 11):
-                st.session_state.regras_ativas[f"Diag Direita {i:02d}"]["ativo"] = False
-                st.session_state.regras_ativas[f"Diag Esquerda {i:02d}"]["ativo"] = False
+    with col_btn2:
+        if st.button("🚫 Desativar Todas as 20 Diagonais", use_container_width=True):
+            for k in st.session_state.regras_diagonais:
+                st.session_state.regras_diagonais[k]["ativo"] = False
+            st.rerun()
+    with col_btn3:
+        if st.button("🔄 Definir Todas as Diagonais para Faixa 0 a 2", use_container_width=True):
+            for k in st.session_state.regras_diagonais:
+                st.session_state.regras_diagonais[k]["faixa"] = (0, 2)
             st.rerun()
 
-    with st.expander("↘️ 10 Diagonais Direitas"):
+    with st.expander("↘️ 10 Diagonais Direitas (Ativação e Faixa Mín/Máx)", expanded=True):
         for k in diag_dir:
             s_d = stats["stats_grupos"][k]
-            chk, sl = st.columns([2, 3])
-            with chk:
-                st.session_state.regras_ativas[k]["ativo"] = st.checkbox(f"{k} (Saídas: {s_d['total_saidas']} | Mín: {s_d['min']} | Máx: {s_d['max']})", value=st.session_state.regras_ativas[k]["ativo"], key=f"c_{k}")
-            with sl:
-                if st.session_state.regras_ativas[k]["ativo"]:
-                    v = st.slider(f"Faixa {k}", 0, 6, (int(st.session_state.regras_ativas[k]["min"]), int(st.session_state.regras_ativas[k]["max"])), key=f"s_{k}", label_visibility="collapsed")
-                    st.session_state.regras_ativas[k]["min"], st.session_state.regras_ativas[k]["max"] = v
+            col_c, col_s = st.columns([2, 3])
+            with col_c:
+                st.session_state.regras_diagonais[k]["ativo"] = st.checkbox(
+                    f"**{k}** (Saídas: {s_d['total_saidas']} | Mín: {s_d['min']} | Máx: {s_d['max']})",
+                    value=st.session_state.regras_diagonais[k]["ativo"],
+                    key=f"chk_d_{k}"
+                )
+            with col_s:
+                st.session_state.regras_diagonais[k]["faixa"] = st.slider(
+                    f"Faixa {k}",
+                    min_value=0,
+                    max_value=6,
+                    value=st.session_state.regras_diagonais[k]["faixa"],
+                    key=f"sld_d_{k}",
+                    label_visibility="collapsed"
+                )
 
-    with st.expander("↙️ 10 Diagonais Esquerdas"):
+    with st.expander("↙️ 10 Diagonais Esquerdas (Ativação e Faixa Mín/Máx)", expanded=True):
         for k in diag_esq:
             s_d = stats["stats_grupos"][k]
-            chk, sl = st.columns([2, 3])
-            with chk:
-                st.session_state.regras_ativas[k]["ativo"] = st.checkbox(f"{k} (Saídas: {s_d['total_saidas']} | Mín: {s_d['min']} | Máx: {s_d['max']})", value=st.session_state.regras_ativas[k]["ativo"], key=f"c_{k}")
-            with sl:
-                if st.session_state.regras_ativas[k]["ativo"]:
-                    v = st.slider(f"Faixa {k}", 0, 6, (int(st.session_state.regras_ativas[k]["min"]), int(st.session_state.regras_ativas[k]["max"])), key=f"s_{k}", label_visibility="collapsed")
-                    st.session_state.regras_ativas[k]["min"], st.session_state.regras_ativas[k]["max"] = v
+            col_c, col_s = st.columns([2, 3])
+            with col_c:
+                st.session_state.regras_diagonais[k]["ativo"] = st.checkbox(
+                    f"**{k}** (Saídas: {s_d['total_saidas']} | Mín: {s_d['min']} | Máx: {s_d['max']})",
+                    value=st.session_state.regras_diagonais[k]["ativo"],
+                    key=f"chk_d_{k}"
+                )
+            with col_s:
+                st.session_state.regras_diagonais[k]["faixa"] = st.slider(
+                    f"Faixa {k}",
+                    min_value=0,
+                    max_value=6,
+                    value=st.session_state.regras_diagonais[k]["faixa"],
+                    key=f"sld_d_{k}",
+                    label_visibility="collapsed"
+                )
+
+# Compilação das regras ativas para uso no gerador e depurador
+regras_compiladas = []
+for k, v in st.session_state.regras_padroes.items():
+    if v["ativo"]:
+        regras_compiladas.append((frozenset(st.session_state.grupos_base[k]), v["faixa"][0], v["faixa"][1]))
+for k, v in st.session_state.regras_diagonais.items():
+    if v["ativo"]:
+        regras_compiladas.append((frozenset(st.session_state.grupos_base[k]), v["faixa"][0], v["faixa"][1]))
 
 # ==============================================================================
 # ABA: FECHAMENTO (DE 7 A 60 DEZENAS)
@@ -660,15 +712,13 @@ with tab_fechamento:
 
         st.divider()
         st.subheader("4. Depuração e Redução por Filtros Ativos")
-        st.caption("Passe as apostas geradas pelos filtros da aba '⚙️ Filtros & Estatísticas' para descartar combinações improváveis:")
+        st.caption("Passe as apostas geradas pelos filtros configurados na Aba 1 para descartar combinações improváveis:")
 
         if st.button("Depurar e Reduzir Jogos com Filtros Ativos 🧹", use_container_width=True):
-            regras_comp = [(frozenset(st.session_state.grupos_base[k]), v["min"], v["max"]) for k, v in st.session_state.regras_ativas.items() if v["ativo"]]
             jogos_depurados = []
-            
             with st.spinner("Filtrando apostas da Mega-Sena..."):
                 for c in st.session_state.jogos_fechamento:
-                    if validar_jogo(c, set(c), regras_comp,
+                    if validar_jogo(c, set(c), regras_compiladas,
                                     st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
                                     st.session_state.filtro_consec_ativo, st.session_state.max_consec,
                                     st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
@@ -716,16 +766,15 @@ with tab_gerador:
     qtd = st.number_input("Quantidade de Jogos Desejada:", min_value=1, max_value=200, value=5)
     
     if st.button("Gerar Apostas da Mega-Sena 🚀", use_container_width=True):
-        regras_comp = [(frozenset(st.session_state.grupos_base[k]), v["min"], v["max"]) for k, v in st.session_state.regras_ativas.items() if v["ativo"]]
         jogos, unicos, t = [], set(), 0
         pool = list(range(1, 61))
         
-        with st.spinner("Filtrando apostas..."):
+        with st.spinner("Filtrando apostas com os filtros ativos..."):
             while len(jogos) < qtd and t < 250_000:
                 c = sorted(random.sample(pool, 6))
                 ctup = tuple(c)
                 if ctup not in unicos:
-                    if validar_jogo(c, set(c), regras_comp,
+                    if validar_jogo(c, set(c), regras_compiladas,
                                     st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
                                     st.session_state.filtro_consec_ativo, st.session_state.max_consec,
                                     st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
@@ -750,7 +799,7 @@ with tab_gerador:
             use_container_width=True
         )
         for i, j in enumerate(st.session_state.jogos_aleatorios):
-            st.code(f"Aposta #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])} | Soma: {sum(j)}")
+            st.code(f"Jogo #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])} | Soma: {sum(j)}")
 
 # ==============================================================================
 # ABA: CONFERIR JOGOS (ARQUIVO .TXT)
@@ -871,7 +920,7 @@ with tab_hist:
             "Mín": info["min"],
             "Máx": info["max"],
             "Dezenas": " ".join([f"{n:02d}" for n in info["dezenas"]]),
-            "Ativo": "Sim" if st.session_state.regras_ativas[k]["ativo"] else "Não"
+            "Ativo": "Sim" if st.session_state.regras_diagonais[k]["ativo"] else "Não"
         })
     df_diags = pd.DataFrame(dados_diags).sort_values(by="Total Saídas", ascending=False)
     st.dataframe(df_diags, use_container_width=True, height=450)
