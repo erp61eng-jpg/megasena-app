@@ -3,13 +3,14 @@ import pandas as pd
 import re
 import io
 
+# Configuração da página
 st.set_page_config(
-    page_title="Filtrador de Jogos por Temperatura de Dezenas",
+    page_title="Filtrador de Jogos - Termômetro de Dezenas",
     page_icon="🎯",
     layout="wide"
 )
 
-# Estilização CSS para as dezenas coloridas (Pills/Badges)
+# Estilização CSS para as dezenas circulares coloridas
 st.markdown("""
 <style>
     .dezena-box {
@@ -21,144 +22,167 @@ st.markdown("""
         border-radius: 50%;
         margin: 2px 4px;
         font-weight: 700;
-        font-size: 15px;
+        font-size: 14px;
         color: #ffffff !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
-    .quente { background-color: #d63031; } /* Vermelho */
-    .media  { background-color: #e67e22; } /* Laranja / Amarelo escuro */
-    .fria   { background-color: #0984e3; } /* Azul */
-    
-    .jogo-card {
+    .quente { 
+        background-color: #d63031 !important; 
+        border: 2px solid #ff7675;
+    }
+    .media { 
+        background-color: #e67e22 !important; 
+        border: 2px solid #f39c12;
+    }
+    .fria { 
+        background-color: #0984e3 !important; 
+        border: 2px solid #74b9ff;
+    }
+    .card-jogo {
         background-color: #1e272e;
-        border: 1px solid #2f3640;
+        border: 1px solid #3d4a54;
         border-radius: 8px;
-        padding: 10px 16px;
+        padding: 8px 16px;
         margin-bottom: 8px;
         display: flex;
         align-items: center;
         justify-content: space-between;
     }
-    .info-tag {
-        font-size: 13px;
+    .info-jogo {
         color: #dcdde1;
-        margin-left: 15px;
+        font-size: 13px;
+        font-weight: 600;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🎯 Filtrador de Combinações com Dezenas Coloridas")
+st.title("🎯 Filtrador de Jogos com Cores Térmicas")
+st.write("Carregue seu arquivo de combinações para aplicar os filtros e visualizar cada dezena colorida por frequência.")
 
-def extrair_jogos_do_texto(conteudo_texto: str) -> list[list[int]]:
-    """Extrai uma lista de jogos (cada jogo é uma lista de inteiros ordenados)."""
+# =====================================================================
+# FUNÇÕES DE EXTRAÇÃO E PROCESSAMENTO
+# =====================================================================
+def extrair_jogos_de_texto(conteudo: str) -> list[list[int]]:
+    """Extrai uma lista de jogos a partir de strings, separadores variados e quebras de linha."""
     jogos = []
-    for linha in conteudo_texto.splitlines():
-        dezenas = re.findall(r'\b\d{1,2}\b', linha)
-        if len(dezenas) >= 5:  # Considera linhas com pelo menos 5 dezenas válidas
-            jogos.append(sorted([int(d) for d in dezenas]))
+    for linha in conteudo.splitlines():
+        numeros = re.findall(r'\b\d{1,2}\b', linha)
+        if len(numeros) >= 5:  # Padrão mínimo para jogos lotéricos
+            jogos.append(sorted([int(n) for n in numeros]))
     return jogos
 
 # =====================================================================
-# 1. BARRA LATERAL: UPLOADS DE ARQUIVOS
+# SEÇÃO 1: UPLOAD DE ARQUIVOS (DIRETO NO CENTRO DA TELA)
 # =====================================================================
-st.sidebar.header("📁 1. Entrada de Arquivos")
+st.subheader("📂 1. Upload dos Arquivos")
 
-# Upload Principal: Arquivo que receberá os filtros
-upload_jogos = st.sidebar.file_uploader(
-    "Carregar arquivo de jogos para FILTRAR (.txt ou .csv):",
-    type=["txt", "csv"],
-    help="Envie o arquivo contendo os jogos gerados (um jogo por linha)."
-)
+col_arq1, col_arq2 = st.columns(2)
 
-# Upload Opcional: Histórico de resultados para base de cálculo
-upload_historico = st.sidebar.file_uploader(
-    "Carregar histórico/sorteios para frequência (Opcional):",
-    type=["txt", "csv"],
-    help="Se não enviar histórico, a frequência será calculada sobre o próprio arquivo de jogos."
-)
+with col_arq1:
+    upload_jogos = st.file_uploader(
+        "👉 SELECIONE O ARQUIVO DE JOGOS PARA FILTRAR (.txt ou .csv):",
+        type=["txt", "csv"],
+        key="upload_jogos",
+        help="Arquivo contendo as combinações geradas que serão passadas pelo filtro."
+    )
 
+with col_arq2:
+    upload_historico = st.file_uploader(
+        "📊 HISTÓRICO DE RESULTADOS / CONCURSOS (Opcional):",
+        type=["txt", "csv"],
+        key="upload_historico",
+        help="Resultados oficiais para calcular a frequência. Se vazio, a frequência é calculada com base no próprio arquivo de jogos."
+    )
+
+st.write("---")
+
+# =====================================================================
+# SEÇÃO 2: EXECUÇÃO DO PROCESSAMENTO E FILTROS
+# =====================================================================
 if upload_jogos is not None:
     conteudo_jogos = upload_jogos.getvalue().decode("utf-8", errors="ignore")
-    jogos_brutos = extrair_jogos_do_texto(conteudo_jogos)
+    jogos_brutos = extrair_jogos_de_texto(conteudo_jogos)
     
     if not jogos_brutos:
-        st.error("Nenhuma combinação válida com 5 ou mais dezenas foi encontrada no arquivo.")
+        st.error("Nenhuma linha com 5 ou mais dezenas válidas foi encontrada no arquivo enviado.")
         st.stop()
-        
-    st.sidebar.success(f"Carregados **{len(jogos_brutos)}** jogos para filtragem.")
 
-    # =====================================================================
-    # 2. CÁLCULO E CLASSIFICAÇÃO DE TEMPERATURA (CORES)
-    # =====================================================================
+    # Cálculo da frequência
     if upload_historico is not None:
         conteudo_hist = upload_historico.getvalue().decode("utf-8", errors="ignore")
-        base_frequencia = extrair_jogos_do_texto(conteudo_hist)
-        st.sidebar.info(f"Frequência baseada no histórico ({len(base_frequencia)} sorteios).")
+        jogos_base = extrair_jogos_de_texto(conteudo_hist)
+        origem_dados = f"Histórico carregado ({len(jogos_base)} concursos)"
     else:
-        base_frequencia = jogos_brutos
-        st.sidebar.info("Frequência baseada no próprio arquivo de jogos.")
+        jogos_base = jogos_brutos
+        origem_dados = f"Próprio arquivo de jogos ({len(jogos_brutos)} combinações)"
 
-    todas_dezenas = [d for jogo in base_frequencia for d in jogo]
-    serie_freq = pd.Series(todas_dezenas).value_counts()
-    
-    # Determinação das faixas de corte por percentis
-    corte_quente = serie_freq.quantile(0.66)
-    corte_medio = serie_freq.quantile(0.33)
-    
-    dezenas_quentes = set(serie_freq[serie_freq >= corte_quente].index)
-    dezenas_frias   = set(serie_freq[serie_freq < corte_medio].index)
-    dezenas_medias  = set(serie_freq[(serie_freq >= corte_medio) & (serie_freq < corte_quente)].index)
+    todas_dezenas = [d for jogo in jogos_base for d in jogo]
+    freq = pd.Series(todas_dezenas).value_counts()
 
-    # =====================================================================
-    # 3. FILTROS PARAMÉTRICOS DO ARQUIVO
-    # =====================================================================
-    st.sidebar.header("⚙️ 2. Parâmetros de Filtro")
+    # Definição das faixas térmicas (Tercis)
+    corte_quente = freq.quantile(0.66)
+    corte_medio = freq.quantile(0.33)
+
+    dezenas_quentes = set(freq[freq >= corte_quente].index)
+    dezenas_frias = set(freq[freq < corte_medio].index)
+    dezenas_medias = set(freq[(freq >= corte_medio) & (freq < corte_quente)].index)
+
+    # Painel de Filtros na barra lateral
+    st.sidebar.header("⚙️ Ajuste os Filtros")
+    st.sidebar.caption(f"Frequência baseada em: **{origem_dados}**")
     
-    max_por_jogo = max(len(j) for j in jogos_brutos)
-    
+    max_dezenas_por_jogo = max(len(j) for j in jogos_brutos)
+
     filtro_quentes = st.sidebar.slider(
-        "Quantidade de Dezenas 🔴 QUENTES por jogo:",
-        min_value=0, max_value=max_por_jogo, value=(1, max_por_jogo)
+        "🔴 Dezenas QUENTES por jogo:",
+        min_value=0,
+        max_value=max_dezenas_por_jogo,
+        value=(1, max_dezenas_por_jogo)
     )
+
     filtro_medias = st.sidebar.slider(
-        "Quantidade de Dezenas 🟠 MÉDIAS por jogo:",
-        min_value=0, max_value=max_por_jogo, value=(0, max_por_jogo)
+        "🟠 Dezenas MÉDIAS por jogo:",
+        min_value=0,
+        max_value=max_dezenas_por_jogo,
+        value=(0, max_dezenas_por_jogo)
     )
+
     filtro_frias = st.sidebar.slider(
-        "Quantidade de Dezenas 🔵 FRIAS por jogo:",
-        min_value=0, max_value=max_por_jogo, value=(0, max_por_jogo)
+        "🔵 Dezenas FRIAS por jogo:",
+        min_value=0,
+        max_value=max_dezenas_por_jogo,
+        value=(0, max_dezenas_por_jogo)
     )
-    
-    filtro_pares_ativo = st.sidebar.checkbox("Ativar filtro de Pares")
+
+    filtro_pares_ativo = st.sidebar.checkbox("Ativar filtro de PARES", value=False)
     if filtro_pares_ativo:
         filtro_pares = st.sidebar.slider(
-            "Quantidade de Dezenas PARES por jogo:",
-            min_value=0, max_value=max_por_jogo, value=(2, 4)
+            "Quantidade de dezenas PARES:",
+            min_value=0,
+            max_value=max_dezenas_por_jogo,
+            value=(2, 4)
         )
 
-    # =====================================================================
-    # 4. EXECUÇÃO DO FILTRO NO ARQUIVO
-    # =====================================================================
+    # Filtragem dos jogos
     jogos_filtrados = []
-    
     for jogo in jogos_brutos:
         qtd_q = sum(1 for d in jogo if d in dezenas_quentes)
         qtd_m = sum(1 for d in jogo if d in dezenas_medias)
         qtd_f = sum(1 for d in jogo if d in dezenas_frias)
         qtd_pares = sum(1 for d in jogo if d % 2 == 0)
-        
-        # Teste de conformidade com os filtros
-        valido = (
+
+        passou = (
             filtro_quentes[0] <= qtd_q <= filtro_quentes[1] and
-            filtro_medias[0]  <= qtd_m <= filtro_medias[1] and
-            filtro_frias[0]   <= qtd_f <= filtro_frias[1]
+            filtro_medias[0] <= qtd_m <= filtro_medias[1] and
+            filtro_frias[0] <= qtd_f <= filtro_frias[1]
         )
-        if filtro_pares_ativo and valido:
-            valido = filtro_pares[0] <= qtd_pares <= filtro_pares[1]
-            
-        if valido:
+
+        if filtro_pares_ativo and passou:
+            passou = filtro_pares[0] <= qtd_pares <= filtro_pares[1]
+
+        if passou:
             jogos_filtrados.append({
-                "dezenas": jogo,
+                "jogo": jogo,
                 "quentes": qtd_q,
                 "medias": qtd_m,
                 "frias": qtd_f,
@@ -166,74 +190,73 @@ if upload_jogos is not None:
             })
 
     # =====================================================================
-    # 5. PAINEL DE RESULTADOS E COLORIZAÇÃO VISUAL
+    # SEÇÃO 3: RESULTADOS E MAPA DE CALOR
     # =====================================================================
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Jogos no Arquivo", len(jogos_brutos))
-    col2.metric("Jogos Aprovados", len(jogos_filtrados))
-    taxa_retencao = (len(jogos_filtrados) / len(jogos_brutos)) * 100 if jogos_brutos else 0
-    col3.metric("Taxa de Aprovação", f"{taxa_retencao:.1f}%")
-    col4.metric("Jogos Eliminados", len(jogos_brutos) - len(jogos_filtrados))
-    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total no Arquivo", len(jogos_brutos))
+    m2.metric("Jogos Aprovados", len(jogos_filtrados))
+    m3.metric("Jogos Eliminados", len(jogos_brutos) - len(jogos_filtrados))
+    taxa = (len(jogos_filtrados) / len(jogos_brutos)) * 100 if jogos_brutos else 0
+    m4.metric("Taxa de Retenção", f"{taxa:.1f}%")
+
     st.write("---")
-    
-    # Resumo das Dezenas Classificadas com Cores
-    st.subheader("Classificação Térmica das Dezenas")
-    
-    def renderizar_pills(conjunto_dezenas, classe_css):
+
+    # Amostragem das dezenas classificadas com cores
+    st.subheader("🔥 Mapa de Temperatura das Dezenas")
+
+    def gerar_html_dezenas(grupo_dezenas, classe_css):
         html = ""
-        for d in sorted(conjunto_dezenas):
+        for d in sorted(grupo_dezenas):
             html += f'<span class="dezena-box {classe_css}">{d:02d}</span>'
         return html
 
     st.markdown(f"**🔴 Quentes ({len(dezenas_quentes)} dezenas):**", unsafe_allow_html=True)
-    st.markdown(renderizar_pills(dezenas_quentes, "quente"), unsafe_allow_html=True)
-    
+    st.markdown(gerar_html_dezenas(dezenas_quentes, "quente"), unsafe_allow_html=True)
+
     st.markdown(f"**🟠 Médias ({len(dezenas_medias)} dezenas):**", unsafe_allow_html=True)
-    st.markdown(renderizar_pills(dezenas_medias, "media"), unsafe_allow_html=True)
-    
+    st.markdown(gerar_html_dezenas(dezenas_medias, "media"), unsafe_allow_html=True)
+
     st.markdown(f"**🔵 Frias ({len(dezenas_frias)} dezenas):**", unsafe_allow_html=True)
-    st.markdown(renderizar_pills(dezenas_frias, "fria"), unsafe_allow_html=True)
+    st.markdown(gerar_html_dezenas(dezenas_frias, "fria"), unsafe_allow_html=True)
 
     st.write("---")
 
-    # Exibição dos Jogos Aprovados com as Dezenas Coloridas
-    st.subheader(f"Jogos Aprovados no Filtro ({len(jogos_filtrados)} jogos)")
-    
-    limite_visualizacao = 100  # Limite para renderização suave no navegador
-    for idx, item in enumerate(jogos_filtrados[:limite_visualizacao]):
-        html_jogo = '<div class="jogo-card"><div>'
-        html_jogo += f'<strong style="color:#a4b0be; margin-right: 12px;">#{idx+1:03d}</strong>'
+    # Exibição dos jogos aprovados coloridos dezena por dezena
+    st.subheader(f"📋 Jogos Aprovados ({len(jogos_filtrados)} jogos)")
+
+    limite_exibicao = 50
+    for idx, item in enumerate(jogos_filtrados[:limite_exibicao]):
+        html_linha = '<div class="card-jogo"><div>'
+        html_linha += f'<span style="color:#8395a7; margin-right: 12px; font-weight: bold;">#{idx+1:03d}</span>'
         
-        # Colorir cada dezena de acordo com o grupo
-        for d in item["dezenas"]:
+        for d in item["jogo"]:
             if d in dezenas_quentes:
                 css = "quente"
             elif d in dezenas_medias:
                 css = "media"
             else:
                 css = "fria"
-            html_jogo += f'<span class="dezena-box {css}">{d:02d}</span>'
+            html_linha += f'<span class="dezena-box {css}">{d:02d}</span>'
             
-        html_jogo += '</div>'
-        html_jogo += f'<div class="info-tag">🔴 {item["quentes"]} | 🟠 {item["medias"]} | 🔵 {item["frias"]} | P: {item["pares"]}</div>'
-        html_jogo += '</div>'
-        
-        st.markdown(html_jogo, unsafe_allow_html=True)
+        html_linha += '</div>'
+        html_linha += f'<div class="info-jogo">🔴 {item["quentes"]} | 🟠 {item["medias"]} | 🔵 {item["frias"]} | Pares: {item["pares"]}</div>'
+        html_linha += '</div>'
+        st.markdown(html_linha, unsafe_allow_html=True)
 
-    if len(jogos_filtrados) > limite_visualizacao:
-        st.info(f"Exibindo os primeiros {limite_visualizacao} jogos na tela. O download abaixo contém todos os {len(jogos_filtrados)} jogos aprovados.")
+    if len(jogos_filtrados) > limite_exibicao:
+        st.info(f"Mostrando os primeiros {limite_exibicao} jogos na tela para fluidez do navegador. O arquivo completo com todos os {len(jogos_filtrados)} jogos pode ser baixado no botão abaixo.")
 
-    # Botão de Download do Arquivo Filtrado
-    linhas_saida = [" ".join(f"{d:02d}" for d in item["dezenas"]) for item in jogos_filtrados]
-    texto_exportacao = "\n".join(linhas_saida)
+    # =====================================================================
+    # SEÇÃO 4: DOWNLOAD DO ARQUIVO FILTRADO
+    # =====================================================================
+    texto_saida = "\n".join([" ".join(f"{d:02d}" for d in item["jogo"]) for item in jogos_filtrados])
     
     st.download_button(
-        label="📥 Baixar Arquivo Filtrado (.txt)",
-        data=texto_exportacao,
+        label="📥 Baixar Jogos Filtrados (.txt)",
+        data=texto_saida,
         file_name="jogos_filtrados.txt",
         mime="text/plain"
     )
 
 else:
-    st.info("Utilize a barra lateral à esquerda para carregar o seu arquivo de combinações (`.txt` ou `.csv`).")
+    st.info("Envie seu arquivo de jogos no campo acima para carregar as dezenas e ativar os controles de filtro.")
