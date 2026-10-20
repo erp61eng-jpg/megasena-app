@@ -399,6 +399,7 @@ def sincronizar_filtros_com_historico(stats_atuais, top30):
         st.session_state[f"faixa_{k}"] = (mn, mx)
 
     st.session_state.dezenas_fechamento_input = " ".join([f"{n:02d}" for n in top30])
+    st.session_state.jogos_fechamento = []
     st.session_state.jogos_fechamento_filtrados = []
 
 def obter_regras_compiladas():
@@ -635,8 +636,13 @@ with tab_fechamento:
         df_funil.columns = ["Dezena", "Score Funil", "Total Saídas", "Saídas Recentes", "Momentum", "Atraso"]
         st.dataframe(df_funil, use_container_width=True)
 
+    # ==========================================================================
+    # 3. ESCOLHA DAS DEZENAS, DESDOBRAMENTO & RESULTADOS DA 3ª SEÇÃO
+    # ==========================================================================
     st.divider()
-    st.subheader("3. Escolha das Dezenas do Fechamento (Editável)")
+    st.subheader("3. Escolha das Dezenas & Depuração Direta")
+    st.caption("Gere os jogos por garantia matemática ou depure diretamente aplicando os filtros ativos:")
+
     c_fech1, c_fech2 = st.columns([3, 2])
     with c_fech1:
         entrada_manual = st.text_input(
@@ -653,7 +659,8 @@ with tab_fechamento:
                 "Quina (Garante 5 se 6)",
                 "Sena (Garante 6 se 6 - 100% Fechado)",
                 "Terno (Garante 3 se 6)"
-            ]
+            ],
+            key="metodo_desdobramento_sel"
         )
 
     dezenas_digitadas = extrair_dezenas_texto(entrada_manual)
@@ -664,11 +671,11 @@ with tab_fechamento:
     elif len(dezenas_digitadas) > 30:
         st.error(f"Você informou {len(dezenas_digitadas)} dezenas. O limite máximo é 30.")
     else:
-        if st.button("Calcular Combinações / Desdobramento 🧮", use_container_width=True):
+        if st.button("Calcular e Depurar Jogos 🧮", use_container_width=True):
             regras_comp = obter_regras_compiladas()
             
             if "Filtros Definidos" in gar:
-                with st.spinner("Analisando combinações e aplicando filtros ativos..."):
+                with st.spinner("Analisando combinações e aplicando filtros ativos diretamente..."):
                     jogos_aprovados = []
                     total_testados = 0
                     teto_limite = 5000
@@ -693,28 +700,58 @@ with tab_fechamento:
                     st.session_state.jogos_fechamento_filtrados = jogos_aprovados
                     st.session_state.taxa_cobertura = 100.0
                     st.session_state.total_combinacoes_testadas = total_testados
+                    st.session_state.tipo_execucao_sec3 = "filtros_diretos"
             else:
                 if len(dezenas_digitadas) > 20 and ("Quadra" in gar or "Quina" in gar):
                     st.warning("⚠️ Com mais de 20 dezenas, o cálculo exato de matriz de cobertura pode ser demorado.")
                 with st.spinner("Processando fechamento matemático..."):
                     j_fech, cob = gerar_fechamento_guloso(dezenas_digitadas, gar)
                     st.session_state.jogos_fechamento = j_fech
-                    st.session_state.taxa_cobertura = cob
                     st.session_state.jogos_fechamento_filtrados = []
+                    st.session_state.taxa_cobertura = cob
                     st.session_state.total_combinacoes_testadas = None
+                    st.session_state.tipo_execucao_sec3 = "garantia_pura"
+
+    # EXIBIÇÃO DIRETA DOS RESULTADOS DA 3ª SEÇÃO
+    if st.session_state.jogos_fechamento:
+        qtd_total = len(st.session_state.jogos_fechamento)
+        tipo_exec = st.session_state.get("tipo_execucao_sec3", "garantia_pura")
+        
+        st.markdown("#### 📊 Resultado da 3ª Seção:")
+        if tipo_exec == "filtros_diretos":
+            testados = st.session_state.get('total_combinacoes_testadas', qtd_total)
+            st.success(f"🎯 **Depuração Concluída na 3ª Seção:** Das **{testados:,}** combinações geradas, **{qtd_total:,} jogos atenderam 100% dos filtros ativos**.")
+        else:
+            st.success(f"📦 **Desdobramento Concluído na 3ª Seção:** **{qtd_total:,} apostas geradas** com garantia de **{st.session_state.get('taxa_cobertura', 100):.1f}%**.")
+
+        # Download e listagem dentro da própria Seção 3
+        st.download_button(
+            "📥 Baixar Jogos da 3ª Seção (.TXT)",
+            data=converter_para_txt(st.session_state.jogos_fechamento),
+            file_name="megasena_jogos_sec3.txt",
+            mime="text/plain",
+            key="btn_down_sec3",
+            use_container_width=True
+        )
+
+        with st.expander(f"Ver Lista de Apostas Geradas na 3ª Seção ({qtd_total} jogos)", expanded=True):
+            for i, j in enumerate(st.session_state.jogos_fechamento[:100]):
+                st.code(f"Aposta #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])} | Soma: {sum(j)}")
+            if qtd_total > 100:
+                st.caption(f"Mostrando as primeiras 100 de {qtd_total} apostas geradas. Utilize o botão de download para obter o arquivo completo.")
 
     # ==========================================================================
-    # 4. DEPURAÇÃO & REFINAMENTO (COM SUPORTE A UPLOAD DIRETO)
+    # 4. RE-DEPURAÇÃO ADICIONAL & UPLOAD EXTERNO
     # ==========================================================================
     st.divider()
-    st.subheader("4. Depuração e Refinamento de Apostas")
-    st.caption("Passe uma lista de apostas pelos filtros ativos para descartar jogos improváveis:")
+    st.subheader("4. Re-depuração Adicional & Upload de Jogos")
+    st.caption("Passe uma lista externa ou re-filtre os jogos gerados na 3ª seção caso queira aplicar novas regras:")
 
     origem_depuracao = st.radio(
-        "Selecione a fonte das apostas para depurar:",
+        "Selecione a fonte para re-depurar:",
         [
-            "Apostas do Desdobramento Gerado Acima (Memória)",
-            "📁 Fazer Upload de Arquivo .TXT (Jogos Pré-Depurados / Externos)"
+            "Apostas da 3ª Seção (Memória Atual)",
+            "📁 Fazer Upload de Arquivo .TXT (Jogos Externos)"
         ],
         horizontal=True
     )
@@ -724,33 +761,32 @@ with tab_fechamento:
 
     if "Upload" in origem_depuracao:
         arq_upload = st.file_uploader(
-            "Selecione o arquivo .TXT com as apostas a refinar:",
+            "Carregue o arquivo .TXT com apostas a refinar:",
             type=["txt"],
-            key="upload_jogos_pre_depurados",
-            help="Carregue qualquer arquivo .TXT com apostas de 6 dezenas para filtrá-las diretamente sem reprocessar combinações."
+            key="upload_jogos_pre_depurados"
         )
         if arq_upload is not None:
             conteudo_txt = arq_upload.getvalue().decode("utf-8", errors="ignore")
             base_para_filtrar = ler_arquivo_jogos_txt(conteudo_txt)
             if base_para_filtrar:
-                st.info(f"📂 **{len(base_para_filtrar):,} apostas** carregadas com sucesso do arquivo.")
-                nome_origem = "Arquivo TXT Carregado"
+                st.info(f"📂 **{len(base_para_filtrar):,} apostas** carregadas do arquivo.")
+                nome_origem = "Arquivo TXT"
             else:
                 st.error("Nenhuma aposta válida de 6 dezenas encontrada no arquivo.")
     else:
         if st.session_state.jogos_fechamento:
             base_para_filtrar = st.session_state.jogos_fechamento
-            nome_origem = "Desdobramento Atual"
-            st.caption(f"Base na memória: **{len(base_para_filtrar):,} apostas brutas**.")
+            nome_origem = "Apostas da 3ª Seção"
+            st.caption(f"Base disponível para re-filtrar: **{len(base_para_filtrar):,} apostas**.")
         else:
-            st.info("Nenhum desdobramento foi calculado acima ainda. Calcule no item 3 ou selecione a opção de Upload de arquivo TXT.")
+            st.info("Nenhuma aposta gerada na 3ª Seção para re-depurar.")
 
     if base_para_filtrar:
-        if st.button("Depurar e Reduzir Apostas com Filtros Ativos 🧹", use_container_width=True):
+        if st.button("Executar Nova Passada de Filtros 🧹", use_container_width=True):
             regras_comp = obter_regras_compiladas()
             jogos_depurados = []
             
-            with st.spinner("Filtrando apostas pelos parâmetros configurados..."):
+            with st.spinner("Re-filtrando apostas..."):
                 for c in base_para_filtrar:
                     if validar_jogo(c, set(c), regras_comp,
                                     st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
@@ -765,28 +801,26 @@ with tab_fechamento:
 
             st.session_state.jogos_fechamento_filtrados = jogos_depurados
             
-            qtd_inicial = len(base_para_filtrar)
-            qtd_dep = len(jogos_depurados)
-            if qtd_dep > 0:
-                reducao = ((qtd_inicial - qtd_dep) / qtd_inicial) * 100
-                st.success(f"🎉 Depuração Concluída ({nome_origem})! De **{qtd_inicial:,}** apostas de entrada, restaram **{qtd_dep:,} jogos aprovados** (Corte de **{reducao:.1f}%**).")
+            qtd_ini = len(base_para_filtrar)
+            qtd_fim = len(jogos_depurados)
+            if qtd_fim > 0:
+                reducao = ((qtd_ini - qtd_fim) / qtd_ini) * 100
+                st.success(f"🎉 Re-depuração Concluída ({nome_origem})! De **{qtd_ini:,}** restaram **{qtd_fim:,} bilhetes** (Corte adicional de **{reducao:.1f}%**).")
             else:
-                st.error("Nenhum jogo da lista passou em todos os filtros ativos. Alivie algumas regras na aba de Filtros.")
+                st.error("Nenhum jogo passou pelos filtros atuais.")
 
-        lista_pronta = st.session_state.jogos_fechamento_filtrados
-        if lista_pronta:
-            st.write(f"### 📋 Jogos Prontos para Aposta ({len(lista_pronta)} bilhetes):")
+        if st.session_state.jogos_fechamento_filtrados:
+            st.write(f"### 📋 Jogos Re-depurados ({len(st.session_state.jogos_fechamento_filtrados)} bilhetes):")
             st.download_button(
-                "📥 Baixar Lista Depurada em TXT",
-                data=converter_para_txt(lista_pronta),
-                file_name="megasena_apostas_depuradas.txt",
+                "📥 Baixar Lista Re-depurada (.TXT)",
+                data=converter_para_txt(st.session_state.jogos_fechamento_filtrados),
+                file_name="megasena_redepurada_sec4.txt",
                 mime="text/plain",
+                key="btn_down_sec4",
                 use_container_width=True
             )
-            for i, j in enumerate(lista_pronta[:100]):
+            for i, j in enumerate(st.session_state.jogos_fechamento_filtrados[:100]):
                 st.code(f"Aposta #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])} | Soma: {sum(j)}")
-            if len(lista_pronta) > 100:
-                st.caption(f"Mostrando as primeiras 100 de {len(lista_pronta)} apostas. Baixe o arquivo TXT para ter a relação completa.")
 
 # ==============================================================================
 # ABA: GERADOR DE APOSTAS
@@ -870,12 +904,15 @@ with tab_conferir:
             "Usar da memória:",
             [
                 "Nenhum",
-                "Jogos Prontos do Desdobramento",
+                "Jogos da 3ª Seção (Desdobramento/Filtros Diretos)",
+                "Jogos Re-depurados da 4ª Seção",
                 "Jogos do Gerador de Apostas"
             ]
         )
-        if opcao_sessao == "Jogos Prontos do Desdobramento":
-            jogos_conferir = st.session_state.jogos_fechamento_filtrados if st.session_state.jogos_fechamento_filtrados else st.session_state.jogos_fechamento
+        if opcao_sessao == "Jogos da 3ª Seção (Desdobramento/Filtros Diretos)":
+            jogos_conferir = st.session_state.jogos_fechamento
+        elif opcao_sessao == "Jogos Re-depurados da 4ª Seção":
+            jogos_conferir = st.session_state.jogos_fechamento_filtrados
         elif opcao_sessao == "Jogos do Gerador de Apostas":
             jogos_conferir = st.session_state.jogos_aleatorios
 
@@ -1071,13 +1108,13 @@ with tab_volante:
     
     lista_fechamento_ativa = st.session_state.jogos_fechamento_filtrados if st.session_state.jogos_fechamento_filtrados else st.session_state.jogos_fechamento
     if lista_fechamento_ativa:
-        opcoes_visualizacao.extend([f"Desdobramento - #{i+1:02d}" for i in range(len(lista_fechamento_ativa[:100]))])
+        opcoes_visualizacao.extend([f"Aposta Depurada - #{i+1:02d}" for i in range(len(lista_fechamento_ativa[:100]))])
     if st.session_state.jogos_aleatorios:
         opcoes_visualizacao.extend([f"Gerador - #{i+1:02d}" for i in range(len(st.session_state.jogos_aleatorios))])
 
     escolha = st.selectbox("Selecione um jogo para ver na cartela:", opcoes_visualizacao)
     jogo_exibir = []
-    if "Desdobramento" in escolha:
+    if "Aposta Depurada" in escolha:
         idx = int(escolha.split("#")[1]) - 1
         jogo_exibir = lista_fechamento_ativa[idx]
     elif "Gerador" in escolha:
