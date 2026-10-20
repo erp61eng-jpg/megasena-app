@@ -39,7 +39,7 @@ TAMANHO_JOGO = 6
 QTD_LINHAS = 6
 
 # ==============================================================================
-# 2. MAPEAMENTO MATEMÁTICO DA MATRIZ 6x10 (MEGA-SENA)
+# 2. MAPEAMENTO MATEMÁTICO DA MATRIZ 6x10
 # ==============================================================================
 @st.cache_data
 def get_primos_megasena():
@@ -56,7 +56,6 @@ def get_moldura_megasena():
 
 @st.cache_data
 def get_quadrantes_megasena():
-    """Divisão da matriz 6x10 em 4 quadrantes de 15 dezenas (3x5 cada)."""
     q1, q2, q3, q4 = [], [], [], []
     for r in range(6):
         for c in range(10):
@@ -104,7 +103,7 @@ def construir_todos_grupos():
     return grupos
 
 # ==============================================================================
-# 3. MOTOR ESTATÍSTICO, CICLO DAS DEZENAS & FUNIL DE ELLIOTT
+# 3. MOTOR ESTATÍSTICO, CICLO DAS DEZENAS & FUNIL DE ELLIOTT (TOP 30)
 # ==============================================================================
 def contar_consecutivos(jogo):
     maior = seq = 1
@@ -117,7 +116,6 @@ def contar_consecutivos(jogo):
     return maior
 
 def calcular_ciclo_dezenas(historico_completo):
-    """Calcula o ciclo atual com base no Coupon Collector's Problem."""
     dezenas_sorteadas = set()
     sorteios_no_ciclo = 0
     numero_ciclo = 1
@@ -198,9 +196,9 @@ def calcular_funil_elliott(historico_fatia):
         })
 
     dezenas_ordenadas = sorted(scores.keys(), key=lambda d: scores[d], reverse=True)
-    top_20_elliott = sorted(dezenas_ordenadas[:20])
+    top_30_elliott = sorted(dezenas_ordenadas[:30])
     
-    return top_20_elliott, sorted(detalhes_funil, key=lambda x: x["score"], reverse=True)
+    return top_30_elliott, sorted(detalhes_funil, key=lambda x: x["score"], reverse=True)
 
 def calcular_estatisticas_dinamicas(historico_fatia, grupos_base):
     cnt_dezenas = Counter()
@@ -252,7 +250,7 @@ def calcular_estatisticas_dinamicas(historico_fatia, grupos_base):
     }
 
 # ==============================================================================
-# 4. FUNÇÕES DE SINCRONIZAÇÃO E CONTROLE DE ESTADO
+# 4. CONTROLE DE ESTADO & REGRAS
 # ==============================================================================
 if "grupos_base" not in st.session_state:
     st.session_state.grupos_base = construir_todos_grupos()
@@ -264,7 +262,7 @@ if "jogos_aleatorios" not in st.session_state: st.session_state.jogos_aleatorios
 if "jogos_fechamento" not in st.session_state: st.session_state.jogos_fechamento = []
 if "jogos_fechamento_filtrados" not in st.session_state: st.session_state.jogos_fechamento_filtrados = []
 
-def sincronizar_filtros_com_historico(stats_atuais, top20):
+def sincronizar_filtros_com_historico(stats_atuais, top30):
     st.session_state.filtro_soma_ativo = True
     st.session_state.faixa_soma = (int(stats_atuais["min_soma"]), int(stats_atuais["max_soma"]))
     st.session_state.filtro_consec_ativo = True
@@ -277,7 +275,6 @@ def sincronizar_filtros_com_historico(stats_atuais, top20):
     st.session_state.faixa_quentes = (1, 4)
     st.session_state.faixa_frias = (0, 2)
 
-    # Filtro de Quadrantes 2x2
     st.session_state.filtro_quads_ativo = True
     st.session_state.max_por_quadrante = 3
     st.session_state.min_quadrantes = 3
@@ -288,7 +285,7 @@ def sincronizar_filtros_com_historico(stats_atuais, top20):
         st.session_state[f"ativo_{k}"] = eh_padrao
         st.session_state[f"faixa_{k}"] = (mn, mx)
 
-    st.session_state.dezenas_fechamento_input = " ".join([f"{n:02d}" for n in top20])
+    st.session_state.dezenas_fechamento_input = " ".join([f"{n:02d}" for n in top30])
     st.session_state.jogos_fechamento_filtrados = []
 
 def obter_regras_compiladas():
@@ -329,30 +326,30 @@ with st.sidebar:
 
 historico_ativo = st.session_state.historico_sorteios[-qtd_analise:]
 stats = calcular_estatisticas_dinamicas(historico_ativo, st.session_state.grupos_base)
-top20_elliott, lista_funil_detalhada = calcular_funil_elliott(historico_ativo)
+top30_elliott, lista_funil_detalhada = calcular_funil_elliott(historico_ativo)
 ciclo_atual = calcular_ciclo_dezenas(st.session_state.historico_sorteios)
 mapa_quadrantes = get_quadrantes_megasena()
 quads_sets = {k: set(v) for k, v in mapa_quadrantes.items()}
 
-# FINGERPRINT: Detecta troca de concursos ou novos sorteios inseridos
+# FINGERPRINT: Detecta troca na barra lateral ou novo sorteio
 fingerprint_atual = (qtd_analise, len(st.session_state.historico_sorteios), tuple(historico_ativo[-1]) if historico_ativo else ())
 
 if "historico_fingerprint" not in st.session_state:
     st.session_state.historico_fingerprint = fingerprint_atual
-    sincronizar_filtros_com_historico(stats, top20_elliott)
+    sincronizar_filtros_com_historico(stats, top30_elliott)
 elif st.session_state.historico_fingerprint != fingerprint_atual:
     st.session_state.historico_fingerprint = fingerprint_atual
     if auto_sinc:
-        sincronizar_filtros_com_historico(stats, top20_elliott)
+        sincronizar_filtros_com_historico(stats, top30_elliott)
 
 with st.sidebar:
     if st.button("🔄 Recalibrar Filtros Agora", use_container_width=True):
-        sincronizar_filtros_com_historico(stats, top20_elliott)
+        sincronizar_filtros_com_historico(stats, top30_elliott)
         st.success("Filtros sincronizados!")
         st.rerun()
 
 # ==============================================================================
-# 6. COMBINATÓRIA E VALIDAÇÃO DE FILTROS
+# 6. COMBINATÓRIA, DESDOBRAMENTO & VALIDAÇÃO
 # ==============================================================================
 def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_consec,
                  f_rep, r_rep, ult_set, f_coinc, max_c, hist_sets,
@@ -378,7 +375,6 @@ def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_
         if not (r_q[0] <= len(cand_set & s_q) <= r_q[1]): return False
         if not (r_f[0] <= len(cand_set & s_f) <= r_f[1]): return False
         
-    # Filtro de Quadrantes 2x2
     if f_quads and q_sets:
         contagens = [len(cand_set & s) for s in q_sets.values()]
         if max(contagens) > max_q:
@@ -473,7 +469,7 @@ def renderizar_volante_6x10(jogo, titulo=""):
 # 7. INTERFACE PRINCIPAL
 # ==============================================================================
 st.title("🍀 Mega-Sena: Laboratório & Fechamentos")
-st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos • Matriz 6x10 • Ciclo & Quadrantes • Funil de Elliott.")
+st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos • Matriz 6x10 • Top 30 Elliott • Ciclo & Quadrantes.")
 
 tab_fechamento, tab_gerador, tab_conferir, tab_filtros, tab_hist, tab_volante = st.tabs([
     "🎯 Fechamentos & Funil",
@@ -490,10 +486,9 @@ diag_dir = [f"Diag Direita {i:02d}" for i in range(1, 11)]
 diag_esq = [f"Diag Esquerda {i:02d}" for i in range(1, 11)]
 
 # ==============================================================================
-# ABA: FECHAMENTO & FUNIL DE ELLIOTT
+# ABA: FECHAMENTO & FUNIL DE ELLIOTT (TOP 30)
 # ==============================================================================
 with tab_fechamento:
-    # Card do Ciclo das Dezenas
     st.markdown("### 🔄 Ciclo das Dezenas (Coupon Collector)")
     col_c1, col_c2, col_c3 = st.columns([1, 1, 3])
     col_c1.metric("Ciclo Vigente", f"#{ciclo_atual['numero_ciclo']}")
@@ -518,28 +513,29 @@ with tab_fechamento:
     st.text("\n".join(linhas_texto))
 
     st.divider()
-    st.subheader("2. As 20 Dezenas Ranqueadas pelo Funil de Elliott")
-    str_sugestao_20 = " ".join([f"{n:02d}" for n in top20_elliott])
-    st.code(f"Top 20 Elliott: {str_sugestao_20}")
+    st.subheader("2. As 30 Dezenas Ranqueadas pelo Funil de Elliott")
+    str_sugestao_30 = " ".join([f"{n:02d}" for n in top30_elliott])
+    st.code(f"Top 30 Elliott: {str_sugestao_30}")
 
-    with st.expander("Ver Detalhes do Score do Funil"):
-        df_funil = pd.DataFrame(lista_funil_detalhada[:20])
+    with st.expander("Ver Detalhes do Score do Funil (Top 30)"):
+        df_funil = pd.DataFrame(lista_funil_detalhada[:30])
         df_funil.columns = ["Dezena", "Score Funil", "Total Saídas", "Saídas Recentes", "Momentum", "Atraso"]
         st.dataframe(df_funil, use_container_width=True)
 
     st.divider()
     st.subheader("3. Escolha das Dezenas do Fechamento (Editável)")
-    c_fech1, c_fech2 = st.columns([3, 1])
+    c_fech1, c_fech2 = st.columns([3, 2])
     with c_fech1:
         entrada_manual = st.text_input(
             "Dezenas Selecionadas:",
             key="dezenas_fechamento_input",
-            help="Altere os números livremente respeitando o intervalo de 7 a 20 dezenas."
+            help="Altere os números livremente respeitando o intervalo de 7 a 30 dezenas."
         )
     with c_fech2:
         gar = st.selectbox(
-            "Garantia Matemática:",
+            "Método de Desdobramento / Garantia:",
             [
+                "Filtros Definidos (Apenas jogos 100% aprovados nas regras)",
                 "Quadra (Garante 4 se 6)",
                 "Quina (Garante 5 se 6)",
                 "Sena (Garante 6 se 6 - 100% Fechado)",
@@ -551,70 +547,104 @@ with tab_fechamento:
     st.write(f"Dezenas selecionadas ({len(dezenas_digitadas)}): `{' - '.join([f'{n:02d}' for n in dezenas_digitadas])}`")
 
     if len(dezenas_digitadas) < 7:
-        st.info("Digite pelo menos 7 dezenas para calcular o fechamento.")
-    elif len(dezenas_digitadas) > 20:
-        st.error(f"Você informou {len(dezenas_digitadas)} dezenas. O limite máximo é 20.")
+        st.info("Digite pelo menos 7 dezenas para calcular o desdobramento.")
+    elif len(dezenas_digitadas) > 30:
+        st.error(f"Você informou {len(dezenas_digitadas)} dezenas. O limite máximo é 30.")
     else:
-        if st.button("Calcular Desdobramento Fechado 🧮", use_container_width=True):
-            with st.spinner("Processando combinações da Mega-Sena..."):
-                j_fech, cob = gerar_fechamento_guloso(dezenas_digitadas, gar)
-                st.session_state.jogos_fechamento = j_fech
-                st.session_state.taxa_cobertura = cob
-                st.session_state.jogos_fechamento_filtrados = []
+        if st.button("Calcular Combinações / Desdobramento 🧮", use_container_width=True):
+            regras_comp = obter_regras_compiladas()
+            
+            # MODO 1: FILTROS DEFINIDOS (STREAMING COMBINATÓRIO DIRETO)
+            if "Filtros Definidos" in gar:
+                with st.spinner("Analisando combinações e aplicando filtros ativos..."):
+                    jogos_aprovados = []
+                    total_testados = 0
+                    teto_limite = 5000  # Limite de segurança de exibição
+                    
+                    for comb in combinations(dezenas_digitadas, 6):
+                        total_testados += 1
+                        cand = sorted(list(comb))
+                        if validar_jogo(cand, set(cand), regras_comp,
+                                        st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
+                                        st.session_state.filtro_consec_ativo, st.session_state.max_consec,
+                                        st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
+                                        st.session_state.f_max_coinc_ativo, st.session_state.max_coinc_30, hist_sets,
+                                        st.session_state.f_freq_30_ativo, st.session_state.faixa_quentes, st.session_state.faixa_frias,
+                                        stats["quentes"], stats["frias"],
+                                        st.session_state.filtro_quads_ativo, st.session_state.max_por_quadrante,
+                                        st.session_state.min_quadrantes, quads_sets):
+                            jogos_aprovados.append(cand)
+                            if len(jogos_aprovados) >= teto_limite:
+                                break
+
+                    st.session_state.jogos_fechamento = jogos_aprovados
+                    st.session_state.jogos_fechamento_filtrados = jogos_aprovados
+                    st.session_state.taxa_cobertura = 100.0
+                    st.session_state.total_combinacoes_testadas = total_testados
+
+            # MODO 2: GARANTIAS CLÁSSICAS (QUADRA, QUINA, SENA, TERNO)
+            else:
+                if len(dezenas_digitadas) > 20 and ("Quadra" in gar or "Quina" in gar):
+                    st.warning("⚠️ Com mais de 20 dezenas, o cálculo exato de matriz de cobertura pode ser demorado. O algoritmo gerará a melhor cobertura disponível.")
+                with st.spinner("Processando fechamento matemático..."):
+                    j_fech, cob = gerar_fechamento_guloso(dezenas_digitadas, gar)
+                    st.session_state.jogos_fechamento = j_fech
+                    st.session_state.taxa_cobertura = cob
+                    st.session_state.jogos_fechamento_filtrados = []
+                    st.session_state.total_combinacoes_testadas = None
 
     if st.session_state.jogos_fechamento:
         qtd_bruta = len(st.session_state.jogos_fechamento)
-        st.success(f"Fechamento Bruto: **{qtd_bruta} jogos gerados** (Garantia: {st.session_state.get('taxa_cobertura', 100):.1f}%)")
+        
+        if "Filtros Definidos" in gar:
+            testados = st.session_state.get('total_combinacoes_testadas', qtd_bruta)
+            st.success(f"🎯 Modo Filtros Definidos: De **{testados:,}** combinações geradas a partir das {len(dezenas_digitadas)} dezenas, **{qtd_bruta} jogos atenderam 100% dos filtros**.")
+        else:
+            st.success(f"Fechamento Bruto: **{qtd_bruta} jogos gerados** (Garantia: {st.session_state.get('taxa_cobertura', 100):.1f}%)")
 
-        st.divider()
-        st.subheader("4. Depuração e Redução por Filtros Ativos")
-        if st.button("Depurar e Reduzir Jogos com Filtros Ativos 🧹", use_container_width=True):
-            regras_comp = obter_regras_compiladas()
-            jogos_depurados = []
-            
-            with st.spinner("Filtrando apostas da Mega-Sena..."):
-                for c in st.session_state.jogos_fechamento:
-                    if validar_jogo(c, set(c), regras_comp,
-                                    st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
-                                    st.session_state.filtro_consec_ativo, st.session_state.max_consec,
-                                    st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
-                                    st.session_state.f_max_coinc_ativo, st.session_state.max_coinc_30, hist_sets,
-                                    st.session_state.f_freq_30_ativo, st.session_state.faixa_quentes, st.session_state.faixa_frias,
-                                    stats["quentes"], stats["frias"],
-                                    st.session_state.filtro_quads_ativo, st.session_state.max_por_quadrante,
-                                    st.session_state.min_quadrantes, quads_sets):
-                        jogos_depurados.append(c)
+            st.divider()
+            st.subheader("4. Depuração e Redução por Filtros Ativos")
+            if st.button("Depurar e Reduzir Jogos Brutos com Filtros Ativos 🧹", use_container_width=True):
+                regras_comp = obter_regras_compiladas()
+                jogos_depurados = []
+                
+                with st.spinner("Filtrando apostas da Mega-Sena..."):
+                    for c in st.session_state.jogos_fechamento:
+                        if validar_jogo(c, set(c), regras_comp,
+                                        st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
+                                        st.session_state.filtro_consec_ativo, st.session_state.max_consec,
+                                        st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
+                                        st.session_state.f_max_coinc_ativo, st.session_state.max_coinc_30, hist_sets,
+                                        st.session_state.f_freq_30_ativo, st.session_state.faixa_quentes, st.session_state.faixa_frias,
+                                        stats["quentes"], stats["frias"],
+                                        st.session_state.filtro_quads_ativo, st.session_state.max_por_quadrante,
+                                        st.session_state.min_quadrantes, quads_sets):
+                            jogos_depurados.append(c)
 
-            st.session_state.jogos_fechamento_filtrados = jogos_depurados
-            
-            if jogos_depurados:
-                qtd_dep = len(jogos_depurados)
-                reducao = ((qtd_bruta - qtd_dep) / qtd_bruta) * 100
-                st.success(f"🎉 Depuração Concluída! De **{qtd_bruta}** apostas brutas, restaram **{qtd_dep} jogos aprovados** (Redução de **{reducao:.1f}%** no custo).")
-            else:
-                st.error("Nenhum jogo do fechamento passou em todos os filtros. Alivie algumas regras na aba de Filtros.")
+                st.session_state.jogos_fechamento_filtrados = jogos_depurados
+                
+                if jogos_depurados:
+                    qtd_dep = len(jogos_depurados)
+                    reducao = ((qtd_bruta - qtd_dep) / qtd_bruta) * 100
+                    st.success(f"🎉 Depuração Concluída! De **{qtd_bruta}** apostas brutas, restaram **{qtd_dep} jogos aprovados** (Redução de **{reducao:.1f}%**).")
+                else:
+                    st.error("Nenhum jogo do fechamento passou em todos os filtros. Alivie algumas regras na aba de Filtros.")
 
-        if st.session_state.jogos_fechamento_filtrados:
-            st.write(f"### 📋 Apostas Depuradas Prontas ({len(st.session_state.jogos_fechamento_filtrados)} jogos):")
+        # Exibição dos Jogos Aprovados
+        lista_pronta = st.session_state.jogos_fechamento_filtrados if st.session_state.jogos_fechamento_filtrados else st.session_state.jogos_fechamento
+        if lista_pronta:
+            st.write(f"### 📋 Jogos Prontos para Aposta ({len(lista_pronta)} bilhetes):")
             st.download_button(
-                "📥 Baixar Jogos Depurados em TXT",
-                data=converter_para_txt(st.session_state.jogos_fechamento_filtrados),
-                file_name="megasena_fechamento_depurado.txt",
+                "📥 Baixar Lista em TXT",
+                data=converter_para_txt(lista_pronta),
+                file_name="megasena_apostas_selecionadas.txt",
                 mime="text/plain",
                 use_container_width=True
             )
-            for i, j in enumerate(st.session_state.jogos_fechamento_filtrados):
+            for i, j in enumerate(lista_pronta[:100]):
                 st.code(f"Aposta #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])} | Soma: {sum(j)}")
-
-        with st.expander(f"Ver lista completa do Fechamento Bruto ({qtd_bruta} apostas)"):
-            st.download_button(
-                "📥 Baixar Fechamento Bruto (.TXT)",
-                data=converter_para_txt(st.session_state.jogos_fechamento),
-                file_name="megasena_fechamento_bruto.txt",
-                mime="text/plain"
-            )
-            for i, j in enumerate(st.session_state.jogos_fechamento):
-                st.code(f"Aposta #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])}")
+            if len(lista_pronta) > 100:
+                st.caption(f"Mostrando as primeiras 100 de {len(lista_pronta)} apostas. Baixe o arquivo TXT para ter a relação completa.")
 
 # ==============================================================================
 # ABA: GERADOR DE APOSTAS
@@ -698,15 +728,12 @@ with tab_conferir:
             "Usar da memória:",
             [
                 "Nenhum",
-                "Jogos do Fechamento Depurado (Filtrados)",
-                "Jogos do Fechamento Bruto",
+                "Jogos Prontos do Desdobramento",
                 "Jogos do Gerador de Apostas"
             ]
         )
-        if opcao_sessao == "Jogos do Fechamento Depurado (Filtrados)":
-            jogos_conferir = st.session_state.jogos_fechamento_filtrados
-        elif opcao_sessao == "Jogos do Fechamento Bruto":
-            jogos_conferir = st.session_state.jogos_fechamento
+        if opcao_sessao == "Jogos Prontos do Desdobramento":
+            jogos_conferir = st.session_state.jogos_fechamento_filtrados if st.session_state.jogos_fechamento_filtrados else st.session_state.jogos_fechamento
         elif opcao_sessao == "Jogos do Gerador de Apostas":
             jogos_conferir = st.session_state.jogos_aleatorios
 
@@ -783,19 +810,18 @@ with tab_filtros:
             st.slider("Top Quentes:", 0, 6, key="faixa_quentes")
             st.slider("Mais Atrasadas:", 0, 6, key="faixa_frias")
 
-    # Bloco do Filtro de Quadrantes 2x2
     st.divider()
     st.markdown("### 📐 Filtro de Quadrantes 2x2 (Distribuição Multinomial)")
-    st.caption("Controla o espalhamento nas 4 áreas de 15 dezenas da cartela. Evita concentração excessiva num mesmo setor.")
+    st.caption("Controla a dispersão nos 4 setores da cartela para evitar acúmulos improváveis.")
     cq1, cq2, cq3 = st.columns(3)
     with cq1:
         st.checkbox("Ativar Filtro de Quadrantes", key="filtro_quads_ativo")
     with cq2:
         if st.session_state.filtro_quads_ativo:
-            st.slider("Máximo por Quadrante:", 1, 5, key="max_por_quadrante", help="Evita mais que X dezenas em um só quadrante.")
+            st.slider("Máximo por Quadrante:", 1, 5, key="max_por_quadrante", help="Evita mais que X dezenas em um mesmo quadrante.")
     with cq3:
         if st.session_state.filtro_quads_ativo:
-            st.slider("Mínimo de Quadrantes Presentes:", 1, 4, key="min_quadrantes", help="Garante que as 6 dezenas ocupem pelo menos X quadrantes distintos.")
+            st.slider("Mínimo de Quadrantes Presentes:", 1, 4, key="min_quadrantes", help="Exige que o jogo ocupe pelo menos X quadrantes distintos.")
 
     st.divider()
     st.write("Padrões da Matriz (Mega-Sena):")
@@ -896,21 +922,17 @@ with tab_volante:
     st.subheader("Visualizador da Cartela Oficial da Mega-Sena (6x10)")
     opcoes_visualizacao = ["Cartela Vazia"]
     
-    if st.session_state.jogos_fechamento_filtrados:
-        opcoes_visualizacao.extend([f"Fechamento Depurado - #{i+1:02d}" for i in range(len(st.session_state.jogos_fechamento_filtrados))])
-    if st.session_state.jogos_fechamento:
-        opcoes_visualizacao.extend([f"Fechamento Bruto - #{i+1:02d}" for i in range(len(st.session_state.jogos_fechamento))])
+    lista_fechamento_ativa = st.session_state.jogos_fechamento_filtrados if st.session_state.jogos_fechamento_filtrados else st.session_state.jogos_fechamento
+    if lista_fechamento_ativa:
+        opcoes_visualizacao.extend([f"Desdobramento - #{i+1:02d}" for i in range(len(lista_fechamento_ativa[:100]))])
     if st.session_state.jogos_aleatorios:
         opcoes_visualizacao.extend([f"Gerador - #{i+1:02d}" for i in range(len(st.session_state.jogos_aleatorios))])
 
     escolha = st.selectbox("Selecione um jogo para ver na cartela:", opcoes_visualizacao)
     jogo_exibir = []
-    if "Depurado" in escolha:
+    if "Desdobramento" in escolha:
         idx = int(escolha.split("#")[1]) - 1
-        jogo_exibir = st.session_state.jogos_fechamento_filtrados[idx]
-    elif "Fechamento Bruto" in escolha:
-        idx = int(escolha.split("#")[1]) - 1
-        jogo_exibir = st.session_state.jogos_fechamento[idx]
+        jogo_exibir = lista_fechamento_ativa[idx]
     elif "Gerador" in escolha:
         idx = int(escolha.split("#")[1]) - 1
         jogo_exibir = st.session_state.jogos_aleatorios[idx]
