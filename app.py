@@ -55,6 +55,24 @@ def get_moldura_megasena():
     return sorted(list(mold))
 
 @st.cache_data
+def get_quadrantes_megasena():
+    """Divisão da matriz 6x10 em 4 quadrantes de 15 dezenas (3x5 cada)."""
+    q1, q2, q3, q4 = [], [], [], []
+    for r in range(6):
+        for c in range(10):
+            num = r * 10 + c + 1
+            if r < 3 and c < 5: q1.append(num)
+            elif r < 3 and c >= 5: q2.append(num)
+            elif r >= 3 and c < 5: q3.append(num)
+            else: q4.append(num)
+    return {
+        "Q1 (Noroeste)": sorted(q1),
+        "Q2 (Nordeste)": sorted(q2),
+        "Q3 (Sudoeste)": sorted(q3),
+        "Q4 (Sudeste)": sorted(q4)
+    }
+
+@st.cache_data
 def get_diagonais_direita_megasena():
     return {
         f"Diag Direita {c+1:02d}": sorted([(r * 10) + ((c + r) % 10) + 1 for r in range(6)])
@@ -86,7 +104,7 @@ def construir_todos_grupos():
     return grupos
 
 # ==============================================================================
-# 3. MOTOR ESTATÍSTICO & FUNIL DE ELLIOTT (60 DEZENAS)
+# 3. MOTOR ESTATÍSTICO, CICLO DAS DEZENAS & FUNIL DE ELLIOTT
 # ==============================================================================
 def contar_consecutivos(jogo):
     maior = seq = 1
@@ -97,6 +115,29 @@ def contar_consecutivos(jogo):
         else:
             seq = 1
     return maior
+
+def calcular_ciclo_dezenas(historico_completo):
+    """Calcula o ciclo atual com base no Coupon Collector's Problem."""
+    dezenas_sorteadas = set()
+    sorteios_no_ciclo = 0
+    numero_ciclo = 1
+
+    for sorteio in historico_completo:
+        sorteios_no_ciclo += 1
+        dezenas_sorteadas.update(sorteio)
+        if len(dezenas_sorteadas) == 60:
+            numero_ciclo += 1
+            sorteios_no_ciclo = 0
+            dezenas_sorteadas = set()
+
+    faltantes = sorted(list(set(range(1, 61)) - dezenas_sorteadas))
+    return {
+        "numero_ciclo": numero_ciclo,
+        "sorteios_no_ciclo": sorteios_no_ciclo,
+        "qtd_sorteadas": len(dezenas_sorteadas),
+        "qtd_faltantes": len(faltantes),
+        "faltantes": faltantes
+    }
 
 def calcular_funil_elliott(historico_fatia):
     total_jogos = len(historico_fatia)
@@ -224,7 +265,6 @@ if "jogos_fechamento" not in st.session_state: st.session_state.jogos_fechamento
 if "jogos_fechamento_filtrados" not in st.session_state: st.session_state.jogos_fechamento_filtrados = []
 
 def sincronizar_filtros_com_historico(stats_atuais, top20):
-    """Atualiza as chaves do Streamlit Session State diretamente para recalibrar a interface."""
     st.session_state.filtro_soma_ativo = True
     st.session_state.faixa_soma = (int(stats_atuais["min_soma"]), int(stats_atuais["max_soma"]))
     st.session_state.filtro_consec_ativo = True
@@ -237,6 +277,11 @@ def sincronizar_filtros_com_historico(stats_atuais, top20):
     st.session_state.faixa_quentes = (1, 4)
     st.session_state.faixa_frias = (0, 2)
 
+    # Filtro de Quadrantes 2x2
+    st.session_state.filtro_quads_ativo = True
+    st.session_state.max_por_quadrante = 3
+    st.session_state.min_quadrantes = 3
+
     for k, v in stats_atuais["stats_grupos"].items():
         eh_padrao = k in ["Pares", "Primos", "Moldura"]
         mn, mx = int(v["min"]), int(v["max"])
@@ -247,7 +292,6 @@ def sincronizar_filtros_com_historico(stats_atuais, top20):
     st.session_state.jogos_fechamento_filtrados = []
 
 def obter_regras_compiladas():
-    """Gera a lista de regras ativas diretamente do estado dos sliders."""
     regras = []
     for k, dezenas in st.session_state.grupos_base.items():
         if st.session_state.get(f"ativo_{k}", False):
@@ -286,8 +330,11 @@ with st.sidebar:
 historico_ativo = st.session_state.historico_sorteios[-qtd_analise:]
 stats = calcular_estatisticas_dinamicas(historico_ativo, st.session_state.grupos_base)
 top20_elliott, lista_funil_detalhada = calcular_funil_elliott(historico_ativo)
+ciclo_atual = calcular_ciclo_dezenas(st.session_state.historico_sorteios)
+mapa_quadrantes = get_quadrantes_megasena()
+quads_sets = {k: set(v) for k, v in mapa_quadrantes.items()}
 
-# FINGERPRINT: Detecta troca de slider, novo concurso ou primeiro carregamento
+# FINGERPRINT: Detecta troca de concursos ou novos sorteios inseridos
 fingerprint_atual = (qtd_analise, len(st.session_state.historico_sorteios), tuple(historico_ativo[-1]) if historico_ativo else ())
 
 if "historico_fingerprint" not in st.session_state:
@@ -305,11 +352,12 @@ with st.sidebar:
         st.rerun()
 
 # ==============================================================================
-# 6. COMBINATÓRIA E UTILITÁRIOS (6 DEZENAS)
+# 6. COMBINATÓRIA E VALIDAÇÃO DE FILTROS
 # ==============================================================================
 def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_consec,
                  f_rep, r_rep, ult_set, f_coinc, max_c, hist_sets,
-                 f_freq, r_q, r_f, s_q, s_f):
+                 f_freq, r_q, r_f, s_q, s_f,
+                 f_quads, max_q, min_q, q_sets):
     if f_soma and not (r_soma[0] <= sum(cand) <= r_soma[1]):
         return False
     if f_consec and contar_consecutivos(cand) > m_consec:
@@ -329,6 +377,15 @@ def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_
     if f_freq:
         if not (r_q[0] <= len(cand_set & s_q) <= r_q[1]): return False
         if not (r_f[0] <= len(cand_set & s_f) <= r_f[1]): return False
+        
+    # Filtro de Quadrantes 2x2
+    if f_quads and q_sets:
+        contagens = [len(cand_set & s) for s in q_sets.values()]
+        if max(contagens) > max_q:
+            return False
+        if sum(1 for c in contagens if c > 0) < min_q:
+            return False
+            
     return True
 
 def gerar_fechamento_guloso(dezenas, garantia):
@@ -416,14 +473,14 @@ def renderizar_volante_6x10(jogo, titulo=""):
 # 7. INTERFACE PRINCIPAL
 # ==============================================================================
 st.title("🍀 Mega-Sena: Laboratório & Fechamentos")
-st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos • Matriz 6x10 • Funil de Elliott.")
+st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos • Matriz 6x10 • Ciclo & Quadrantes • Funil de Elliott.")
 
 tab_fechamento, tab_gerador, tab_conferir, tab_filtros, tab_hist, tab_volante = st.tabs([
     "🎯 Fechamentos & Funil",
     "🚀 Gerador de Apostas",
     "🎟️ Conferir Jogos (TXT)",
     "⚙️ Filtros & Estatísticas",
-    f"📜 Concursos ({qtd_analise}) & Diagonais",
+    f"📜 Concursos ({qtd_analise}) & Quadrantes",
     "🗺️ Volante Visual 6x10"
 ])
 
@@ -436,9 +493,20 @@ diag_esq = [f"Diag Esquerda {i:02d}" for i in range(1, 11)]
 # ABA: FECHAMENTO & FUNIL DE ELLIOTT
 # ==============================================================================
 with tab_fechamento:
-    st.subheader(f"1. Frequência das 60 Dezenas (Últimos {qtd_analise} Concursos)")
-    st.caption("Quantidade de saídas em texto limpo:")
+    # Card do Ciclo das Dezenas
+    st.markdown("### 🔄 Ciclo das Dezenas (Coupon Collector)")
+    col_c1, col_c2, col_c3 = st.columns([1, 1, 3])
+    col_c1.metric("Ciclo Vigente", f"#{ciclo_atual['numero_ciclo']}")
+    col_c2.metric("Sorteios no Ciclo", f"{ciclo_atual['sorteios_no_ciclo']}")
+    with col_c3:
+        st.write(f"**{ciclo_atual['qtd_faltantes']} Dezenas Faltantes para Fechar o Ciclo:**")
+        if ciclo_atual["faltantes"]:
+            st.code(" ".join([f"{n:02d}" for n in ciclo_atual["faltantes"]]))
+        else:
+            st.success("O ciclo acabou de fechar! Todas as 60 dezenas foram sorteadas.")
 
+    st.divider()
+    st.subheader(f"1. Frequência das 60 Dezenas (Últimos {qtd_analise} Concursos)")
     linhas_texto = []
     for r in range(6):
         linha_nums = []
@@ -451,8 +519,6 @@ with tab_fechamento:
 
     st.divider()
     st.subheader("2. As 20 Dezenas Ranqueadas pelo Funil de Elliott")
-    st.caption("Calculadas via aceleração de onda (Momentum), retração de Fibonacci e descarte de exaustão:")
-
     str_sugestao_20 = " ".join([f"{n:02d}" for n in top20_elliott])
     st.code(f"Top 20 Elliott: {str_sugestao_20}")
 
@@ -463,8 +529,6 @@ with tab_fechamento:
 
     st.divider()
     st.subheader("3. Escolha das Dezenas do Fechamento (Editável)")
-    st.caption("As 20 dezenas do funil já estão preenchidas abaixo. Modifique, adicione ou remova mantendo entre 7 e 20 números:")
-
     c_fech1, c_fech2 = st.columns([3, 1])
     with c_fech1:
         entrada_manual = st.text_input(
@@ -504,8 +568,6 @@ with tab_fechamento:
 
         st.divider()
         st.subheader("4. Depuração e Redução por Filtros Ativos")
-        st.caption("Passe as apostas geradas pelos filtros da aba '⚙️ Filtros & Estatísticas' para descartar jogos improváveis:")
-
         if st.button("Depurar e Reduzir Jogos com Filtros Ativos 🧹", use_container_width=True):
             regras_comp = obter_regras_compiladas()
             jogos_depurados = []
@@ -518,7 +580,9 @@ with tab_fechamento:
                                     st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
                                     st.session_state.f_max_coinc_ativo, st.session_state.max_coinc_30, hist_sets,
                                     st.session_state.f_freq_30_ativo, st.session_state.faixa_quentes, st.session_state.faixa_frias,
-                                    stats["quentes"], stats["frias"]):
+                                    stats["quentes"], stats["frias"],
+                                    st.session_state.filtro_quads_ativo, st.session_state.max_por_quadrante,
+                                    st.session_state.min_quadrantes, quads_sets):
                         jogos_depurados.append(c)
 
             st.session_state.jogos_fechamento_filtrados = jogos_depurados
@@ -575,7 +639,9 @@ with tab_gerador:
                                     st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
                                     st.session_state.f_max_coinc_ativo, st.session_state.max_coinc_30, hist_sets,
                                     st.session_state.f_freq_30_ativo, st.session_state.faixa_quentes, st.session_state.faixa_frias,
-                                    stats["quentes"], stats["frias"]):
+                                    stats["quentes"], stats["frias"],
+                                    st.session_state.filtro_quads_ativo, st.session_state.max_por_quadrante,
+                                    st.session_state.min_quadrantes, quads_sets):
                         jogos.append(c)
                         unicos.add(ctup)
                 t += 1
@@ -601,7 +667,6 @@ with tab_gerador:
 # ==============================================================================
 with tab_conferir:
     st.subheader("Conferência Oficial da Mega-Sena (.TXT)")
-    
     col_res1, col_res2 = st.columns([2, 1])
     with col_res1:
         res_digitado = st.text_input("Digite as 6 dezenas sorteadas:", placeholder="Ex: 04 15 28 35 44 58")
@@ -613,7 +678,6 @@ with tab_conferir:
             st.warning(f"{len(dezenas_extraidas)} dezenas digitadas (precisa de 6).")
 
     st.divider()
-
     arquivo_enviado = st.file_uploader("Buscar arquivo de apostas (.TXT):", type=["txt"])
     jogos_conferir = []
 
@@ -719,16 +783,27 @@ with tab_filtros:
             st.slider("Top Quentes:", 0, 6, key="faixa_quentes")
             st.slider("Mais Atrasadas:", 0, 6, key="faixa_frias")
 
+    # Bloco do Filtro de Quadrantes 2x2
+    st.divider()
+    st.markdown("### 📐 Filtro de Quadrantes 2x2 (Distribuição Multinomial)")
+    st.caption("Controla o espalhamento nas 4 áreas de 15 dezenas da cartela. Evita concentração excessiva num mesmo setor.")
+    cq1, cq2, cq3 = st.columns(3)
+    with cq1:
+        st.checkbox("Ativar Filtro de Quadrantes", key="filtro_quads_ativo")
+    with cq2:
+        if st.session_state.filtro_quads_ativo:
+            st.slider("Máximo por Quadrante:", 1, 5, key="max_por_quadrante", help="Evita mais que X dezenas em um só quadrante.")
+    with cq3:
+        if st.session_state.filtro_quads_ativo:
+            st.slider("Mínimo de Quadrantes Presentes:", 1, 4, key="min_quadrantes", help="Garante que as 6 dezenas ocupem pelo menos X quadrantes distintos.")
+
     st.divider()
     st.write("Padrões da Matriz (Mega-Sena):")
     for padrao in ["Pares", "Primos", "Moldura", "Centro (Miolo)"]:
         s_g = stats["stats_grupos"][padrao]
         chk, sl = st.columns([2, 3])
         with chk:
-            st.checkbox(
-                f"{padrao} (Min: {s_g['min']} | Max: {s_g['max']})",
-                key=f"ativo_{padrao}"
-            )
+            st.checkbox(f"{padrao} (Min: {s_g['min']} | Max: {s_g['max']})", key=f"ativo_{padrao}")
         with sl:
             if st.session_state.get(f"ativo_{padrao}", False):
                 st.slider(f"Faixa {padrao}", 0, 6, key=f"faixa_{padrao}")
@@ -770,7 +845,7 @@ with tab_filtros:
                     st.slider(f"Faixa {k}", 0, 6, key=f"faixa_{k}", label_visibility="collapsed")
 
 # ==============================================================================
-# ABA: HISTÓRICO & TABELA DE DIAGONAIS
+# ABA: HISTÓRICO, QUADRANTES & TABELA DE DIAGONAIS
 # ==============================================================================
 with tab_hist:
     st.subheader(f"Últimos {qtd_analise} Concursos Analisados")
@@ -780,12 +855,22 @@ with tab_hist:
             {"Concurso": f"#{len(historico_ativo)-idx:02d}", "Dezenas": " - ".join([f"{n:02d}" for n in s]), "Soma": sum(s)}
             for idx, s in enumerate(reversed(historico_ativo))
         ]
-        st.dataframe(pd.DataFrame(dados_tabela), use_container_width=True, height=400)
+        st.dataframe(pd.DataFrame(dados_tabela), use_container_width=True, height=350)
     with c_h2:
         top_10 = [(d, stats["cnt_dezenas"][d]) for d in stats["ordenados_freq"][:10]]
         st.write("**Top 10 Quentes:** " + ", ".join([f"{d:02d} ({qtd}x)" for d, qtd in top_10]))
         bot_10 = sorted(stats["cnt_dezenas"].items(), key=lambda x: x[1])[:10]
         st.write("**Top 10 Frias:** " + ", ".join([f"{d:02d} ({qtd}x)" for d, qtd in bot_10]))
+
+    st.divider()
+    st.subheader("Mapeamento dos 4 Quadrantes (3x5)")
+    col_q1, col_q2, col_q3, col_q4 = st.columns(4)
+    for idx_q, (nome_q, dezenas_q) in enumerate(mapa_quadrantes.items()):
+        total_saidas_quad = sum(stats["cnt_dezenas"][d] for d in dezenas_q)
+        alvo_col = [col_q1, col_q2, col_q3, col_q4][idx_q]
+        with alvo_col:
+            alvo_col.metric(nome_q, f"{total_saidas_quad} saídas")
+            alvo_col.caption(" ".join([f"{n:02d}" for n in dezenas_q]))
 
     st.divider()
     st.subheader("Desempenho das 20 Diagonais (6x10)")
@@ -802,7 +887,7 @@ with tab_hist:
             "Ativo": "Sim" if st.session_state.get(f"ativo_{k}", False) else "Não"
         })
     df_diags = pd.DataFrame(dados_diags).sort_values(by="Total Saídas", ascending=False)
-    st.dataframe(df_diags, use_container_width=True, height=450)
+    st.dataframe(df_diags, use_container_width=True, height=400)
 
 # ==============================================================================
 # ABA: VOLANTE VISUAL (6x10)
