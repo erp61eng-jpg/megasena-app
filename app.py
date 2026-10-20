@@ -103,7 +103,7 @@ def construir_todos_grupos():
     return grupos
 
 # ==============================================================================
-# 3. MOTOR ESTATÍSTICO, CICLO DAS DEZENAS & FUNIL DE ELLIOTT (TOP 30)
+# 3. MOTOR ESTATÍSTICO, CICLO & FUNIL DE ELLIOTT (TOP 30)
 # ==============================================================================
 def contar_consecutivos(jogo):
     maior = seq = 1
@@ -250,7 +250,120 @@ def calcular_estatisticas_dinamicas(historico_fatia, grupos_base):
     }
 
 # ==============================================================================
-# 4. CONTROLE DE ESTADO & REGRAS
+# 4. RENDERIZADOR DO HEATMAP VISUAL 6x10
+# ==============================================================================
+def renderizar_heatmap_6x10(cnt_dezenas, titulo="Mapa de Calor da Matriz 6x10"):
+    val_min = min(cnt_dezenas.values()) if cnt_dezenas else 0
+    val_max = max(cnt_dezenas.values()) if cnt_dezenas else 1
+    delta = max(1, val_max - val_min)
+
+    def obter_estilo_calor(freq):
+        ratio = (freq - val_min) / delta
+        if ratio <= 0.25:
+            return "#1e3a8a", "#93c5fd"
+        elif ratio <= 0.50:
+            return "#0369a1", "#e0f2fe"
+        elif ratio <= 0.75:
+            return "#d97706", "#ffffff"
+        else:
+            return "#b91c1c", "#ffffff"
+
+    html = f"""
+    <style>
+        .heat-wrapper {{
+            background: #0f172a;
+            border: 2px solid #334155;
+            border-radius: 12px;
+            padding: 18px;
+            width: fit-content;
+            margin: 12px auto;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+        }}
+        .heat-title {{
+            font-size: 15px;
+            font-weight: 700;
+            color: #38bdf8;
+            text-align: center;
+            margin-bottom: 12px;
+            letter-spacing: 0.5px;
+        }}
+        .heat-grid {{
+            display: grid;
+            grid-template-columns: repeat(10, 48px);
+            gap: 6px;
+        }}
+        .heat-cell {{
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: monospace;
+            border: 1px solid rgba(255,255,255,0.12);
+        }}
+        .heat-num {{
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.1;
+        }}
+        .heat-freq {{
+            font-size: 9.5px;
+            font-weight: 600;
+            opacity: 0.88;
+        }}
+        .heat-legend {{
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-top: 14px;
+            font-size: 11px;
+            font-family: sans-serif;
+            color: #94a3b8;
+        }}
+        .legend-tag {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }}
+        .legend-box {{
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }}
+    </style>
+    <div class="heat-wrapper">
+        <div class="heat-title">{titulo}</div>
+        <div class="heat-grid">
+    """
+
+    for r in range(6):
+        for c in range(10):
+            num = r * 10 + c + 1
+            f = cnt_dezenas[num]
+            bg, text_color = obter_estilo_calor(f)
+            html += f"""
+            <div class="heat-cell" style="background:{bg}; color:{text_color};">
+                <span class="heat-num">{num:02d}</span>
+                <span class="heat-freq">{f}x</span>
+            </div>
+            """
+
+    html += f"""
+        </div>
+        <div class="heat-legend">
+            <div class="legend-tag"><div class="legend-box" style="background:#1e3a8a;"></div> Frias ({val_min}x)</div>
+            <div class="legend-tag"><div class="legend-box" style="background:#0369a1;"></div> Moderadas</div>
+            <div class="legend-tag"><div class="legend-box" style="background:#d97706;"></div> Aquecidas</div>
+            <div class="legend-tag"><div class="legend-box" style="background:#b91c1c;"></div> Super Quentes ({val_max}x)</div>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+# ==============================================================================
+# 5. CONTROLE DE ESTADO & REGRAS
 # ==============================================================================
 if "grupos_base" not in st.session_state:
     st.session_state.grupos_base = construir_todos_grupos()
@@ -297,7 +410,7 @@ def obter_regras_compiladas():
     return regras
 
 # ==============================================================================
-# 5. BARRA LATERAL: CONTROLE DINÂMICO
+# 6. BARRA LATERAL: CONTROLE DINÂMICO
 # ==============================================================================
 with st.sidebar:
     st.header("Janela Estatística")
@@ -331,7 +444,7 @@ ciclo_atual = calcular_ciclo_dezenas(st.session_state.historico_sorteios)
 mapa_quadrantes = get_quadrantes_megasena()
 quads_sets = {k: set(v) for k, v in mapa_quadrantes.items()}
 
-# FINGERPRINT: Detecta troca na barra lateral ou novo sorteio
+# FINGERPRINT
 fingerprint_atual = (qtd_analise, len(st.session_state.historico_sorteios), tuple(historico_ativo[-1]) if historico_ativo else ())
 
 if "historico_fingerprint" not in st.session_state:
@@ -349,7 +462,7 @@ with st.sidebar:
         st.rerun()
 
 # ==============================================================================
-# 6. COMBINATÓRIA, DESDOBRAMENTO & VALIDAÇÃO
+# 7. COMBINATÓRIA, DESDOBRAMENTO & VALIDAÇÃO
 # ==============================================================================
 def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_consec,
                  f_rep, r_rep, ult_set, f_coinc, max_c, hist_sets,
@@ -466,17 +579,17 @@ def renderizar_volante_6x10(jogo, titulo=""):
     st.markdown(grid_html, unsafe_allow_html=True)
 
 # ==============================================================================
-# 7. INTERFACE PRINCIPAL
+# 8. INTERFACE PRINCIPAL
 # ==============================================================================
 st.title("🍀 Mega-Sena: Laboratório & Fechamentos")
-st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos • Matriz 6x10 • Top 30 Elliott • Ciclo & Quadrantes.")
+st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos • Matriz 6x10 • Top 30 Elliott • Heatmap & Quadrantes.")
 
 tab_fechamento, tab_gerador, tab_conferir, tab_filtros, tab_hist, tab_volante = st.tabs([
     "🎯 Fechamentos & Funil",
     "🚀 Gerador de Apostas",
     "🎟️ Conferir Jogos (TXT)",
     "⚙️ Filtros & Estatísticas",
-    f"📜 Concursos ({qtd_analise}) & Quadrantes",
+    f"📜 Concursos ({qtd_analise}), Heatmap & Quadrantes",
     "🗺️ Volante Visual 6x10"
 ])
 
@@ -554,12 +667,11 @@ with tab_fechamento:
         if st.button("Calcular Combinações / Desdobramento 🧮", use_container_width=True):
             regras_comp = obter_regras_compiladas()
             
-            # MODO 1: FILTROS DEFINIDOS (STREAMING COMBINATÓRIO DIRETO)
             if "Filtros Definidos" in gar:
                 with st.spinner("Analisando combinações e aplicando filtros ativos..."):
                     jogos_aprovados = []
                     total_testados = 0
-                    teto_limite = 5000  # Limite de segurança de exibição
+                    teto_limite = 5000
                     
                     for comb in combinations(dezenas_digitadas, 6):
                         total_testados += 1
@@ -581,11 +693,9 @@ with tab_fechamento:
                     st.session_state.jogos_fechamento_filtrados = jogos_aprovados
                     st.session_state.taxa_cobertura = 100.0
                     st.session_state.total_combinacoes_testadas = total_testados
-
-            # MODO 2: GARANTIAS CLÁSSICAS (QUADRA, QUINA, SENA, TERNO)
             else:
                 if len(dezenas_digitadas) > 20 and ("Quadra" in gar or "Quina" in gar):
-                    st.warning("⚠️ Com mais de 20 dezenas, o cálculo exato de matriz de cobertura pode ser demorado. O algoritmo gerará a melhor cobertura disponível.")
+                    st.warning("⚠️ Com mais de 20 dezenas, o cálculo exato de matriz de cobertura pode ser demorado.")
                 with st.spinner("Processando fechamento matemático..."):
                     j_fech, cob = gerar_fechamento_guloso(dezenas_digitadas, gar)
                     st.session_state.jogos_fechamento = j_fech
@@ -593,51 +703,83 @@ with tab_fechamento:
                     st.session_state.jogos_fechamento_filtrados = []
                     st.session_state.total_combinacoes_testadas = None
 
-    if st.session_state.jogos_fechamento:
-        qtd_bruta = len(st.session_state.jogos_fechamento)
-        
-        if "Filtros Definidos" in gar:
-            testados = st.session_state.get('total_combinacoes_testadas', qtd_bruta)
-            st.success(f"🎯 Modo Filtros Definidos: De **{testados:,}** combinações geradas a partir das {len(dezenas_digitadas)} dezenas, **{qtd_bruta} jogos atenderam 100% dos filtros**.")
+    # ==========================================================================
+    # 4. DEPURAÇÃO & REFINAMENTO (COM SUPORTE A UPLOAD DIRETO)
+    # ==========================================================================
+    st.divider()
+    st.subheader("4. Depuração e Refinamento de Apostas")
+    st.caption("Passe uma lista de apostas pelos filtros ativos para descartar jogos improváveis:")
+
+    origem_depuracao = st.radio(
+        "Selecione a fonte das apostas para depurar:",
+        [
+            "Apostas do Desdobramento Gerado Acima (Memória)",
+            "📁 Fazer Upload de Arquivo .TXT (Jogos Pré-Depurados / Externos)"
+        ],
+        horizontal=True
+    )
+
+    base_para_filtrar = []
+    nome_origem = ""
+
+    if "Upload" in origem_depuracao:
+        arq_upload = st.file_uploader(
+            "Selecione o arquivo .TXT com as apostas a refinar:",
+            type=["txt"],
+            key="upload_jogos_pre_depurados",
+            help="Carregue qualquer arquivo .TXT com apostas de 6 dezenas para filtrá-las diretamente sem reprocessar combinações."
+        )
+        if arq_upload is not None:
+            conteudo_txt = arq_upload.getvalue().decode("utf-8", errors="ignore")
+            base_para_filtrar = ler_arquivo_jogos_txt(conteudo_txt)
+            if base_para_filtrar:
+                st.info(f"📂 **{len(base_para_filtrar):,} apostas** carregadas com sucesso do arquivo.")
+                nome_origem = "Arquivo TXT Carregado"
+            else:
+                st.error("Nenhuma aposta válida de 6 dezenas encontrada no arquivo.")
+    else:
+        if st.session_state.jogos_fechamento:
+            base_para_filtrar = st.session_state.jogos_fechamento
+            nome_origem = "Desdobramento Atual"
+            st.caption(f"Base na memória: **{len(base_para_filtrar):,} apostas brutas**.")
         else:
-            st.success(f"Fechamento Bruto: **{qtd_bruta} jogos gerados** (Garantia: {st.session_state.get('taxa_cobertura', 100):.1f}%)")
+            st.info("Nenhum desdobramento foi calculado acima ainda. Calcule no item 3 ou selecione a opção de Upload de arquivo TXT.")
 
-            st.divider()
-            st.subheader("4. Depuração e Redução por Filtros Ativos")
-            if st.button("Depurar e Reduzir Jogos Brutos com Filtros Ativos 🧹", use_container_width=True):
-                regras_comp = obter_regras_compiladas()
-                jogos_depurados = []
-                
-                with st.spinner("Filtrando apostas da Mega-Sena..."):
-                    for c in st.session_state.jogos_fechamento:
-                        if validar_jogo(c, set(c), regras_comp,
-                                        st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
-                                        st.session_state.filtro_consec_ativo, st.session_state.max_consec,
-                                        st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
-                                        st.session_state.f_max_coinc_ativo, st.session_state.max_coinc_30, hist_sets,
-                                        st.session_state.f_freq_30_ativo, st.session_state.faixa_quentes, st.session_state.faixa_frias,
-                                        stats["quentes"], stats["frias"],
-                                        st.session_state.filtro_quads_ativo, st.session_state.max_por_quadrante,
-                                        st.session_state.min_quadrantes, quads_sets):
-                            jogos_depurados.append(c)
+    if base_para_filtrar:
+        if st.button("Depurar e Reduzir Apostas com Filtros Ativos 🧹", use_container_width=True):
+            regras_comp = obter_regras_compiladas()
+            jogos_depurados = []
+            
+            with st.spinner("Filtrando apostas pelos parâmetros configurados..."):
+                for c in base_para_filtrar:
+                    if validar_jogo(c, set(c), regras_comp,
+                                    st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
+                                    st.session_state.filtro_consec_ativo, st.session_state.max_consec,
+                                    st.session_state.f_rep_ant_ativo, st.session_state.rep_ant_faixa, ult_set,
+                                    st.session_state.f_max_coinc_ativo, st.session_state.max_coinc_30, hist_sets,
+                                    st.session_state.f_freq_30_ativo, st.session_state.faixa_quentes, st.session_state.faixa_frias,
+                                    stats["quentes"], stats["frias"],
+                                    st.session_state.filtro_quads_ativo, st.session_state.max_por_quadrante,
+                                    st.session_state.min_quadrantes, quads_sets):
+                        jogos_depurados.append(c)
 
-                st.session_state.jogos_fechamento_filtrados = jogos_depurados
-                
-                if jogos_depurados:
-                    qtd_dep = len(jogos_depurados)
-                    reducao = ((qtd_bruta - qtd_dep) / qtd_bruta) * 100
-                    st.success(f"🎉 Depuração Concluída! De **{qtd_bruta}** apostas brutas, restaram **{qtd_dep} jogos aprovados** (Redução de **{reducao:.1f}%**).")
-                else:
-                    st.error("Nenhum jogo do fechamento passou em todos os filtros. Alivie algumas regras na aba de Filtros.")
+            st.session_state.jogos_fechamento_filtrados = jogos_depurados
+            
+            qtd_inicial = len(base_para_filtrar)
+            qtd_dep = len(jogos_depurados)
+            if qtd_dep > 0:
+                reducao = ((qtd_inicial - qtd_dep) / qtd_inicial) * 100
+                st.success(f"🎉 Depuração Concluída ({nome_origem})! De **{qtd_inicial:,}** apostas de entrada, restaram **{qtd_dep:,} jogos aprovados** (Corte de **{reducao:.1f}%**).")
+            else:
+                st.error("Nenhum jogo da lista passou em todos os filtros ativos. Alivie algumas regras na aba de Filtros.")
 
-        # Exibição dos Jogos Aprovados
-        lista_pronta = st.session_state.jogos_fechamento_filtrados if st.session_state.jogos_fechamento_filtrados else st.session_state.jogos_fechamento
+        lista_pronta = st.session_state.jogos_fechamento_filtrados
         if lista_pronta:
             st.write(f"### 📋 Jogos Prontos para Aposta ({len(lista_pronta)} bilhetes):")
             st.download_button(
-                "📥 Baixar Lista em TXT",
+                "📥 Baixar Lista Depurada em TXT",
                 data=converter_para_txt(lista_pronta),
-                file_name="megasena_apostas_selecionadas.txt",
+                file_name="megasena_apostas_depuradas.txt",
                 mime="text/plain",
                 use_container_width=True
             )
@@ -871,9 +1013,14 @@ with tab_filtros:
                     st.slider(f"Faixa {k}", 0, 6, key=f"faixa_{k}", label_visibility="collapsed")
 
 # ==============================================================================
-# ABA: HISTÓRICO, QUADRANTES & TABELA DE DIAGONAIS
+# ABA: HISTÓRICO, HEATMAP, QUADRANTES & DIAGONAIS
 # ==============================================================================
 with tab_hist:
+    st.subheader("🔥 Mapa de Calor Térmico (Heatmap 6x10)")
+    st.caption(f"Frequência absoluta das dezenas no recorte dos últimos {qtd_analise} sorteios:")
+    renderizar_heatmap_6x10(stats["cnt_dezenas"], titulo=f"Heatmap das 60 Dezenas — Últimos {qtd_analise} Concursos")
+
+    st.divider()
     st.subheader(f"Últimos {qtd_analise} Concursos Analisados")
     c_h1, c_h2 = st.columns([3, 2])
     with c_h1:
