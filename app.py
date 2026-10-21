@@ -83,7 +83,7 @@ def buscar_50_concursos_caixa():
                     concursos_dict[n_conc] = nums
 
         lista_cronologica = [concursos_dict[k] for k in sorted(concursos_dict.keys())]
-        if len(lista_cronologica) >= 5:
+        if len(lista_cronologica) >= 1:
             info_txt = f"#{ultimo_num} realizado em {data_ultimo}"
             return lista_cronologica, info_txt
     except Exception:
@@ -201,9 +201,15 @@ def calcular_ciclo_dezenas(historico_completo):
 
 def calcular_funil_elliott(historico_fatia):
     total_jogos = len(historico_fatia)
-    metade = max(1, total_jogos // 2)
-    jogos_antigos = historico_fatia[:metade]
-    jogos_recentes = historico_fatia[metade:]
+    
+    # Tratamento para quando houver apenas 1 concurso selecionado
+    if total_jogos == 1:
+        jogos_antigos = []
+        jogos_recentes = historico_fatia
+    else:
+        metade = max(1, total_jogos // 2)
+        jogos_antigos = historico_fatia[:metade]
+        jogos_recentes = historico_fatia[metade:]
     
     cnt_antigos = Counter()
     for s in jogos_antigos: cnt_antigos.update(s)
@@ -504,7 +510,7 @@ if "grupos_base" not in st.session_state:
 if "historico_sorteios" not in st.session_state:
     with st.spinner("Conectando à API da Caixa e buscando os últimos 50 concursos reais da Mega-Sena..."):
         dados_oficiais, info_api = buscar_50_concursos_caixa()
-        if dados_oficiais and len(dados_oficiais) >= 5:
+        if dados_oficiais and len(dados_oficiais) >= 1:
             st.session_state.historico_sorteios = dados_oficiais
             st.session_state.origem_dados = f"Caixa Oficial ({info_api})"
         else:
@@ -559,14 +565,15 @@ with st.sidebar:
     
     st.info(f"🌐 **Fonte:** {st.session_state.get('origem_dados', 'Caixa Oficial')}")
     
+    # PERMITE DE 1 CONCURSO EM DIANTE
     qtd_analise = st.slider(
         "Quantidade de Concursos:",
-        min_value=5,
+        min_value=1,
         max_value=total_disponivel,
         value=min(30, total_disponivel),
         step=1
     )
-    st.caption(f"Analisando os últimos {qtd_analise} sorteios.")
+    st.caption(f"Analisando os últimos {qtd_analise} sorteio(s).")
     auto_sinc = st.checkbox("Sincronizar Filtros Automaticamente", value=True)
 
     if st.button("🔄 Atualizar Resultados da Caixa Agora", use_container_width=True):
@@ -696,7 +703,7 @@ def ler_arquivo_jogos_txt(conteudo_texto):
 # 8. INTERFACE PRINCIPAL
 # ==============================================================================
 st.title("🍀 Mega-Sena: Laboratório & Fechamentos")
-st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos Reais • Matriz 6x10 • Top 30 Elliott • Linhas, Colunas, Moldura & Miolo.")
+st.caption(f"Análise Ativa: Últimos {qtd_analise} Concurso(s) • Matriz 6x10 • Top 30 Elliott • Linhas, Colunas, Moldura & Miolo.")
 
 tab_fechamento, tab_gerador, tab_conferir, tab_filtros, tab_hist, tab_volante = st.tabs([
     "🎯 Fechamentos & Funil",
@@ -730,7 +737,7 @@ with tab_fechamento:
             st.success("O ciclo acabou de fechar! Todas as 60 dezenas foram sorteadas.")
 
     st.divider()
-    st.subheader(f"1. Frequência das 60 Dezenas (Últimos {qtd_analise} Concursos)")
+    st.subheader(f"1. Frequência das 60 Dezenas (Últimos {qtd_analise} Concurso(s))")
     linhas_texto = []
     for r in range(6):
         linha_nums = []
@@ -1064,7 +1071,7 @@ with tab_conferir:
 # ABA: FILTROS & ESTATÍSTICAS (SISTEMA PADRONIZADO: LINHAS, COLUNAS E DIAGONAIS)
 # ==============================================================================
 with tab_filtros:
-    st.subheader(f"Filtros Calibrados nos Últimos {qtd_analise} Concursos (Mega-Sena)")
+    st.subheader(f"Filtros Calibrados nos Últimos {qtd_analise} Concurso(s) (Mega-Sena)")
     
     c1, c2 = st.columns(2)
     with c1:
@@ -1208,11 +1215,11 @@ with tab_filtros:
 # ==============================================================================
 with tab_hist:
     st.subheader("🔥 Mapa de Calor Térmico da Mega-Sena (Heatmap 6x10)")
-    st.caption(f"Frequência absoluta das 60 dezenas no recorte dos últimos {qtd_analise} sorteios:")
-    renderizar_heatmap_6x10_vibrante(stats["cnt_dezenas"], titulo=f"Heatmap das 60 Dezenas — Últimos {qtd_analise} Concursos")
+    st.caption(f"Frequência absoluta das 60 dezenas no recorte dos últimos {qtd_analise} concurso(s):")
+    renderizar_heatmap_6x10_vibrante(stats["cnt_dezenas"], titulo=f"Heatmap das 60 Dezenas — Últimos {qtd_analise} Concurso(s)")
 
     st.divider()
-    st.subheader(f"Últimos {qtd_analise} Concursos Analisados")
+    st.subheader(f"Últimos {qtd_analise} Concurso(s) Analisados")
     c_h1, c_h2 = st.columns([3, 2])
     with c_h1:
         dados_tabela = [
