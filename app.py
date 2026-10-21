@@ -1,4 +1,7 @@
 import streamlit as st
+import streamlit.components.v1 as components
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 import re
 from itertools import combinations
@@ -11,10 +14,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# ==============================================================================
-# 1. BASE HISTÓRICA DOS ÚLTIMOS 50 CONCURSOS DA MEGA-SENA
-# ==============================================================================
-HISTORICO_50_MEGASENA = [
+TOTAL_NUMS = 60
+TAMANHO_JOGO = 6
+QTD_LINHAS = 6
+QTD_COLUNAS = 10
+
+# Base de contingência caso a Caixa esteja temporariamente inacessível
+FALLBACK_MEGASENA = [
     [4, 12, 18, 30, 35, 54], [1, 9, 15, 23, 44, 52], [7, 14, 27, 39, 48, 59],
     [10, 11, 25, 33, 42, 58], [3, 16, 28, 37, 45, 60], [5, 20, 22, 34, 49, 56],
     [8, 17, 31, 40, 50, 57], [2, 13, 24, 38, 43, 55], [6, 19, 29, 36, 47, 53],
@@ -34,12 +40,58 @@ HISTORICO_50_MEGASENA = [
     [6, 11, 25, 40, 49, 55], [12, 20, 28, 41, 46, 58]
 ]
 
-TOTAL_NUMS = 60
-TAMANHO_JOGO = 6
-QTD_LINHAS = 6
+# ==============================================================================
+# 1. CONEXÃO AUTOMÁTICA VIA API OFICIAL DA CAIXA (MEGA-SENA)
+# ==============================================================================
+@st.cache_data(ttl=7200, show_spinner=False)
+def buscar_50_concursos_caixa():
+    """Consulta a API oficial da Caixa e busca os últimos 50 sorteios reais da Mega-Sena."""
+    url_base = "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+    }
+    try:
+        resp = requests.get(url_base, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return None, "Offline"
+        
+        dados_ultimo = resp.json()
+        ultimo_num = int(dados_ultimo["numero"])
+        data_ultimo = dados_ultimo.get("dataApuracao", "")
+        
+        concursos_dict = {}
+        concursos_dict[ultimo_num] = sorted([int(d) for d in dados_ultimo["listaDezenas"]])
+        
+        alvos = list(range(max(1, ultimo_num - 49), ultimo_num))
+        
+        def baixar_concurso(num):
+            try:
+                r = requests.get(f"{url_base}/{num}", headers=headers, timeout=5)
+                if r.status_code == 200:
+                    dezenas = [int(d) for d in r.json()["listaDezenas"]]
+                    return num, sorted(dezenas)
+            except Exception:
+                pass
+            return num, None
+
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futuros = [executor.submit(baixar_concurso, n) for n in alvos]
+            for f in as_completed(futuros):
+                n_conc, nums = f.result()
+                if nums and len(nums) == 6:
+                    concursos_dict[n_conc] = nums
+
+        lista_cronologica = [concursos_dict[k] for k in sorted(concursos_dict.keys())]
+        if len(lista_cronologica) >= 5:
+            info_txt = f"#{ultimo_num} realizado em {data_ultimo}"
+            return lista_cronologica, info_txt
+    except Exception:
+        pass
+    return None, "Erro de Conexão"
 
 # ==============================================================================
-# 2. MAPEAMENTO MATEMÁTICO DA MATRIZ 6x10
+# 2. MAPEAMENTO MATEMÁTICO DA MATRIZ 6x10 (MEGA-SENA)
 # ==============================================================================
 @st.cache_data
 def get_primos_megasena():
@@ -48,6 +100,7 @@ def get_primos_megasena():
 
 @st.cache_data
 def get_moldura_megasena():
+    """Linhas 1 e 6 + Colunas 1 e 10 (Total: 28 dezenas)."""
     mold = set(range(1, 11)) | set(range(51, 61))
     for r in range(6):
         mold.add(r * 10 + 1)
@@ -55,7 +108,14 @@ def get_moldura_megasena():
     return sorted(list(mold))
 
 @st.cache_data
+def get_miolo_megasena():
+    """Centro interno da matriz 6x10 (Total: 32 dezenas)."""
+    mold_set = set(get_moldura_megasena())
+    return [n for n in range(1, 61) if n not in mold_set]
+
+@st.cache_data
 def get_quadrantes_megasena():
+    """4 quadrantes de 15 dezenas (3 linhas x 5 colunas cada)."""
     q1, q2, q3, q4 = [], [], [], []
     for r in range(6):
         for c in range(10):
@@ -73,6 +133,7 @@ def get_quadrantes_megasena():
 
 @st.cache_data
 def get_diagonais_direita_megasena():
+    """10 diagonais cilíndricas (+11 mod 10) de 6 dezenas cada."""
     return {
         f"Diag Direita {c+1:02d}": sorted([(r * 10) + ((c + r) % 10) + 1 for r in range(6)])
         for c in range(10)
@@ -80,6 +141,7 @@ def get_diagonais_direita_megasena():
 
 @st.cache_data
 def get_diagonais_esquerda_megasena():
+    """10 diagonais cilíndricas (+9 mod 10) de 6 dezenas cada."""
     return {
         f"Diag Esquerda {c+1:02d}": sorted([(r * 10) + ((c - r) % 10) + 1 for r in range(6)])
         for c in range(10)
@@ -91,7 +153,7 @@ def construir_todos_grupos():
         "Ímpares": [n for n in range(1, 61) if n % 2 != 0],
         "Primos": get_primos_megasena(),
         "Moldura": get_moldura_megasena(),
-        "Centro (Miolo)": [n for n in range(1, 61) if n not in get_moldura_megasena()]
+        "Centro (Miolo)": get_miolo_megasena()
     }
     for l in range(6):
         grupos[f"Linha {l+1}"] = list(range(l * 10 + 1, (l + 1) * 10 + 1))
@@ -145,10 +207,8 @@ def calcular_funil_elliott(historico_fatia):
     
     cnt_antigos = Counter()
     for s in jogos_antigos: cnt_antigos.update(s)
-    
     cnt_recentes = Counter()
     for s in jogos_recentes: cnt_recentes.update(s)
-    
     cnt_total = Counter()
     for s in historico_fatia: cnt_total.update(s)
     
@@ -197,7 +257,6 @@ def calcular_funil_elliott(historico_fatia):
 
     dezenas_ordenadas = sorted(scores.keys(), key=lambda d: scores[d], reverse=True)
     top_30_elliott = sorted(dezenas_ordenadas[:30])
-    
     return top_30_elliott, sorted(detalhes_funil, key=lambda x: x["score"], reverse=True)
 
 def calcular_estatisticas_dinamicas(historico_fatia, grupos_base):
@@ -250,126 +309,207 @@ def calcular_estatisticas_dinamicas(historico_fatia, grupos_base):
     }
 
 # ==============================================================================
-# 4. RENDERIZADOR DO HEATMAP VISUAL 6x10
+# 4. RENDERIZADORES EM IFRAME (HTML ISOLADO: HEATMAP & VOLANTE)
 # ==============================================================================
-def renderizar_heatmap_6x10(cnt_dezenas, titulo="Mapa de Calor da Matriz 6x10"):
-    val_min = min(cnt_dezenas.values()) if cnt_dezenas else 0
-    val_max = max(cnt_dezenas.values()) if cnt_dezenas else 1
+def renderizar_heatmap_6x10_vibrante(cnt_dezenas, titulo="Mapa de Calor Térmico da Mega-Sena (60 Dezenas)"):
+    todos_valores = [cnt_dezenas[n] for n in range(1, 61)]
+    val_min = min(todos_valores) if todos_valores else 0
+    val_max = max(todos_valores) if todos_valores else 1
     delta = max(1, val_max - val_min)
 
     def obter_estilo_calor(freq):
         ratio = (freq - val_min) / delta
-        if ratio <= 0.25:
-            return "#1e3a8a", "#93c5fd"
+        if freq == 0 or ratio == 0.0:
+            return "#dbeafe", "#0369a1"  # Azul Gelo (Fria)
+        elif ratio <= 0.25:
+            return "#38bdf8", "#075985"  # Ciano (Baixa)
         elif ratio <= 0.50:
-            return "#0369a1", "#e0f2fe"
-        elif ratio <= 0.75:
-            return "#d97706", "#ffffff"
+            return "#22c55e", "#ffffff"  # Verde Primavera (Média)
+        elif ratio <= 0.70:
+            return "#eab308", "#713f12"  # Amarelo Ouro (Aquecida)
+        elif ratio <= 0.88:
+            return "#f97316", "#ffffff"  # Laranja (Quente)
         else:
-            return "#b91c1c", "#ffffff"
+            return "#ef4444", "#ffffff"  # Vermelho Rubi (Pico)
 
-    html = f"""
-    <style>
-        .heat-wrapper {{
-            background: #0f172a;
-            border: 2px solid #334155;
-            border-radius: 12px;
-            padding: 18px;
-            width: fit-content;
-            margin: 12px auto;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-        }}
-        .heat-title {{
-            font-size: 15px;
-            font-weight: 700;
-            color: #38bdf8;
-            text-align: center;
-            margin-bottom: 12px;
-            letter-spacing: 0.5px;
-        }}
-        .heat-grid {{
-            display: grid;
-            grid-template-columns: repeat(10, 48px);
-            gap: 6px;
-        }}
-        .heat-cell {{
-            width: 48px;
-            height: 48px;
-            border-radius: 8px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            font-family: monospace;
-            border: 1px solid rgba(255,255,255,0.12);
-        }}
-        .heat-num {{
-            font-size: 13px;
-            font-weight: 800;
-            line-height: 1.1;
-        }}
-        .heat-freq {{
-            font-size: 9.5px;
-            font-weight: 600;
-            opacity: 0.88;
-        }}
-        .heat-legend {{
-            display: flex;
-            justify-content: center;
-            gap: 16px;
-            margin-top: 14px;
-            font-size: 11px;
-            font-family: sans-serif;
-            color: #94a3b8;
-        }}
-        .legend-tag {{
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }}
-        .legend-box {{
-            width: 12px;
-            height: 12px;
-            border-radius: 3px;
-        }}
-    </style>
-    <div class="heat-wrapper">
-        <div class="heat-title">{titulo}</div>
-        <div class="heat-grid">
-    """
-
+    celulas_html = ""
     for r in range(6):
         for c in range(10):
             num = r * 10 + c + 1
             f = cnt_dezenas[num]
             bg, text_color = obter_estilo_calor(f)
-            html += f"""
-            <div class="heat-cell" style="background:{bg}; color:{text_color};">
-                <span class="heat-num">{num:02d}</span>
-                <span class="heat-freq">{f}x</span>
+            celulas_html += f"""
+            <div style="width:50px; height:50px; background:{bg}; color:{text_color}; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:monospace; border:1px solid rgba(0,0,0,0.12); box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+                <span style="font-size:16px; font-weight:900; line-height:1.1;">{num:02d}</span>
+                <span style="font-size:11px; font-weight:800; opacity:0.95;">{f}x</span>
             </div>
             """
 
-    html += f"""
+    full_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {{ margin: 0; padding: 0; background: transparent; font-family: sans-serif; display: flex; justify-content: center; }}
+        .heat-wrapper {{
+            background: #ffffff;
+            border: 2px solid #cbd5e1;
+            border-radius: 14px;
+            padding: 18px;
+            width: fit-content;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        }}
+        .heat-grid {{
+            display: grid;
+            grid-template-columns: repeat(10, 50px);
+            gap: 6px;
+            justify-content: center;
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="heat-wrapper">
+        <div style="font-size:17px; font-weight:800; color:#15803d; text-align:center; margin-bottom:14px; font-family:sans-serif;">
+            {titulo}
         </div>
-        <div class="heat-legend">
-            <div class="legend-tag"><div class="legend-box" style="background:#1e3a8a;"></div> Frias ({val_min}x)</div>
-            <div class="legend-tag"><div class="legend-box" style="background:#0369a1;"></div> Moderadas</div>
-            <div class="legend-tag"><div class="legend-box" style="background:#d97706;"></div> Aquecidas</div>
-            <div class="legend-tag"><div class="legend-box" style="background:#b91c1c;"></div> Super Quentes ({val_max}x)</div>
+        <div class="heat-grid">
+            {celulas_html}
+        </div>
+        <div style="display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:16px; font-size:12px; font-weight:700;">
+            <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#dbeafe; border:1px solid #cbd5e1; display:inline-block;"></span> ❄️ Frias ({val_min}x)</div>
+            <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#38bdf8; display:inline-block;"></span> 💧 Baixas</div>
+            <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#22c55e; display:inline-block;"></span> 🌿 Médias</div>
+            <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#eab308; display:inline-block;"></span> ☀️ Aquecidas</div>
+            <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#f97316; display:inline-block;"></span> 🔥 Quentes</div>
+            <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#ef4444; display:inline-block;"></span> 💥 Top ({val_max}x)</div>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    components.html(full_html, height=470, scrolling=False)
+
+def renderizar_card_aposta_colorido(idx, jogo, extra=""):
+    dezenas_html = "".join([
+        f"<span style='display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; background:linear-gradient(135deg, #16a34a, #15803d); color:#ffffff; font-weight:800; font-size:14px; border-radius:50%; margin:0 3px; box-shadow:0 2px 5px rgba(22,163,74,0.35); font-family:monospace;'>{n:02d}</span>"
+        for n in jogo
+    ])
+    soma_val = sum(jogo)
+    extra_txt = f"<span style='color:#15803d; font-weight:700; margin-right:8px;'>{extra}</span>" if extra else ""
+    html = f"""
+    <div style="background:#ffffff; border:1px solid #bbf7d0; border-left:5px solid #16a34a; border-radius:10px; padding:10px 16px; margin:8px 0; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-weight:800; color:#0f172a; font-size:14px; font-family:sans-serif;">Aposta #{idx:02d}</span>
+            <div>{dezenas_html}</div>
+        </div>
+        <div style="display:flex; align-items:center;">
+            {extra_txt}
+            <span style="background:#dcfce7; color:#15803d; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:700; font-family:sans-serif;">Soma: {soma_val}</span>
         </div>
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
 
+def renderizar_card_conferencia_colorido(idx, jogo, acertos, tag, qtd):
+    dezenas_html = ""
+    for n in jogo:
+        if n in acertos:
+            dezenas_html += f"<span style='display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; background:linear-gradient(135deg, #16a34a, #15803d); color:#ffffff; font-weight:800; font-size:14px; border-radius:50%; margin:0 3px; box-shadow:0 2px 6px rgba(22,163,74,0.4); font-family:monospace;'>{n:02d}</span>"
+        else:
+            dezenas_html += f"<span style='display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; background:#f1f5f9; color:#475569; font-weight:700; font-size:14px; border-radius:50%; margin:0 3px; font-family:monospace; border:1px solid #cbd5e1;'>{n:02d}</span>"
+    
+    cor_badge = "#64748b"
+    bg_badge = "#f1f5f9"
+    if qtd == 6: cor_badge, bg_badge = "#b45309", "#fef3c7"
+    elif qtd == 5: cor_badge, bg_badge = "#dc2626", "#fee2e2"
+    elif qtd == 4: cor_badge, bg_badge = "#16a34a", "#dcfce7"
+
+    html = f"""
+    <div style="background:#ffffff; border:1px solid #e2e8f0; border-left:5px solid {cor_badge}; border-radius:10px; padding:10px 16px; margin:8px 0; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-weight:700; color:#334155; font-size:14px; font-family:sans-serif;">Bilhete #{idx:02d}</span>
+            <div>{dezenas_html}</div>
+        </div>
+        <span style="background:{bg_badge}; color:{cor_badge}; padding:5px 12px; border-radius:14px; font-size:13px; font-weight:800; font-family:sans-serif;">{tag}</span>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+def renderizar_volante_6x10(jogo, titulo=""):
+    marcadas = set(jogo)
+    celulas_html = ""
+    for r in range(6):
+        for c in range(10):
+            num = r * 10 + c + 1
+            if num in marcadas:
+                bg = "linear-gradient(135deg, #16a34a, #15803d)"
+                color = "#ffffff"
+                border = "2px solid #0f5132"
+                weight = "800"
+            else:
+                bg = "#f8fafc"
+                color = "#475569"
+                border = "1px solid #cbd5e1"
+                weight = "600"
+            celulas_html += f"""
+            <div style="width:38px; height:38px; background:{bg}; color:{color}; border:{border}; font-weight:{weight}; border-radius:8px; display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:13px;">
+                {num:02d}
+            </div>
+            """
+
+    full_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {{ margin:0; padding:0; background:transparent; display:flex; justify-content:center; font-family:sans-serif; }}
+        .volante-box {{
+            background: #ffffff;
+            border: 2px solid #16a34a;
+            border-radius: 14px;
+            padding: 16px;
+            width: fit-content;
+            box-shadow: 0 4px 16px rgba(22,163,74,0.15);
+        }}
+        .volante-grid {{
+            display: grid;
+            grid-template-columns: repeat(10, 38px);
+            gap: 6px;
+            justify-content: center;
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="volante-box">
+        <div style="font-weight:800; font-size:16px; margin-bottom:12px; color:#15803d; text-align:center;">
+            {titulo}
+        </div>
+        <div class="volante-grid">
+            {celulas_html}
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    components.html(full_html, height=360, scrolling=False)
+
 # ==============================================================================
-# 5. CONTROLE DE ESTADO & REGRAS
+# 5. INICIALIZAÇÃO DE ESTADO COM CONCURSOS REAIS DA CAIXA
 # ==============================================================================
 if "grupos_base" not in st.session_state:
     st.session_state.grupos_base = construir_todos_grupos()
 
 if "historico_sorteios" not in st.session_state:
-    st.session_state.historico_sorteios = [list(j) for j in HISTORICO_50_MEGASENA]
+    with st.spinner("Conectando à API da Caixa e buscando os últimos 50 concursos reais da Mega-Sena..."):
+        dados_oficiais, info_api = buscar_50_concursos_caixa()
+        if dados_oficiais and len(dados_oficiais) >= 5:
+            st.session_state.historico_sorteios = dados_oficiais
+            st.session_state.origem_dados = f"Caixa Oficial ({info_api})"
+        else:
+            st.session_state.historico_sorteios = [list(j) for j in FALLBACK_MEGASENA]
+            st.session_state.origem_dados = "Base Local de Contingência"
 
 if "jogos_aleatorios" not in st.session_state: st.session_state.jogos_aleatorios = []
 if "jogos_fechamento" not in st.session_state: st.session_state.jogos_fechamento = []
@@ -393,7 +533,7 @@ def sincronizar_filtros_com_historico(stats_atuais, top30):
     st.session_state.min_quadrantes = 3
 
     for k, v in stats_atuais["stats_grupos"].items():
-        eh_padrao = k in ["Pares", "Primos", "Moldura"]
+        eh_padrao = k in ["Pares", "Primos", "Moldura", "Centro (Miolo)"]
         mn, mx = int(v["min"]), int(v["max"])
         st.session_state[f"ativo_{k}"] = eh_padrao
         st.session_state[f"faixa_{k}"] = (mn, mx)
@@ -414,8 +554,10 @@ def obter_regras_compiladas():
 # 6. BARRA LATERAL: CONTROLE DINÂMICO
 # ==============================================================================
 with st.sidebar:
-    st.header("Janela Estatística")
+    st.header("Janela Estatística (Mega-Sena)")
     total_disponivel = len(st.session_state.historico_sorteios)
+    
+    st.info(f"🌐 **Fonte:** {st.session_state.get('origem_dados', 'Caixa Oficial')}")
     
     qtd_analise = st.slider(
         "Quantidade de Concursos:",
@@ -427,13 +569,22 @@ with st.sidebar:
     st.caption(f"Analisando os últimos {qtd_analise} sorteios.")
     auto_sinc = st.checkbox("Sincronizar Filtros Automaticamente", value=True)
 
+    if st.button("🔄 Atualizar Resultados da Caixa Agora", use_container_width=True):
+        st.cache_data.clear()
+        dados_oficiais, info_api = buscar_50_concursos_caixa()
+        if dados_oficiais:
+            st.session_state.historico_sorteios = dados_oficiais
+            st.session_state.origem_dados = f"Caixa Oficial ({info_api})"
+            st.success("Resultados oficiais atualizados!")
+            st.rerun()
+
     with st.expander("Inserir Concurso Manual"):
         novo_jogo_txt = st.text_input("6 Dezenas (ex: 04 15 28 35 44 58):")
         if st.button("Gravar Concurso"):
             nums = [int(n) for n in re.findall(r'\b\d+\b', novo_jogo_txt) if 1 <= int(n) <= 60]
             if len(nums) == 6:
                 st.session_state.historico_sorteios.append(sorted(nums))
-                st.success("Concurso salvo!")
+                st.success("Concurso da Mega-Sena salvo!")
                 st.rerun()
             else:
                 st.error("Digite exatamente 6 números entre 1 e 60.")
@@ -456,49 +607,36 @@ elif st.session_state.historico_fingerprint != fingerprint_atual:
     if auto_sinc:
         sincronizar_filtros_com_historico(stats, top30_elliott)
 
-with st.sidebar:
-    if st.button("🔄 Recalibrar Filtros Agora", use_container_width=True):
-        sincronizar_filtros_com_historico(stats, top30_elliott)
-        st.success("Filtros sincronizados!")
-        st.rerun()
-
 # ==============================================================================
-# 7. COMBINATÓRIA, DESDOBRAMENTO & VALIDAÇÃO
+# 7. COMBINATÓRIA, DESDOBRAMENTO (6 DEZENAS) & VALIDAÇÃO
 # ==============================================================================
 def validar_jogo(cand, cand_set, regras_compiladas, f_soma, r_soma, f_consec, m_consec,
                  f_rep, r_rep, ult_set, f_coinc, max_c, hist_sets,
                  f_freq, r_q, r_f, s_q, s_f,
                  f_quads, max_q, min_q, q_sets):
-    if f_soma and not (r_soma[0] <= sum(cand) <= r_soma[1]):
-        return False
-    if f_consec and contar_consecutivos(cand) > m_consec:
-        return False
+    if f_soma and not (r_soma[0] <= sum(cand) <= r_soma[1]): return False
+    if f_consec and contar_consecutivos(cand) > m_consec: return False
     for g_set, mn, mx in regras_compiladas:
         qtd = len(cand_set & g_set)
-        if qtd < mn or qtd > mx:
-            return False
+        if qtd < mn or qtd > mx: return False
     if f_rep and ult_set:
         rep = len(cand_set & ult_set)
-        if not (r_rep[0] <= rep <= r_rep[1]):
-            return False
+        if not (r_rep[0] <= rep <= r_rep[1]): return False
     if f_coinc and hist_sets:
         for pass_set in hist_sets:
-            if len(cand_set & pass_set) > max_c:
-                return False
+            if len(cand_set & pass_set) > max_c: return False
     if f_freq:
         if not (r_q[0] <= len(cand_set & s_q) <= r_q[1]): return False
         if not (r_f[0] <= len(cand_set & s_f) <= r_f[1]): return False
         
     if f_quads and q_sets:
         contagens = [len(cand_set & s) for s in q_sets.values()]
-        if max(contagens) > max_q:
-            return False
-        if sum(1 for c in contagens if c > 0) < min_q:
-            return False
+        if max(contagens) > max_q: return False
+        if sum(1 for c in contagens if c > 0) < min_q: return False
             
     return True
 
-def gerar_fechamento_guloso(dezenas, garantia):
+def gerar_fechamento_guloso_megasena(dezenas, garantia):
     nums = sorted(dezenas)
     if "Sena" in garantia:
         escolhidos = [sorted(list(c)) for c in combinations(nums, 6)]
@@ -551,64 +689,41 @@ def ler_arquivo_jogos_txt(conteudo_texto):
         elif len(nums) > 6:
             cands = [n for n in nums if n <= 60]
             if len(cands) >= 6:
-                if len(cands) == 7 and cands[0] < 50:
-                    jogos.append(sorted(cands[1:7]))
-                else:
-                    jogos.append(sorted(cands[:6]))
+                jogos.append(sorted(cands[:6]))
     return jogos
-
-def renderizar_volante_6x10(jogo, titulo=""):
-    marcadas = set(jogo)
-    grid_html = f"""
-    <style>
-        .volante-box {{ background:#ffffff; border:2px solid #1b5e20; border-radius:10px; padding:14px; width:fit-content; margin:8px auto; }}
-        .volante-grid {{ display:grid; grid-template-columns:repeat(10, 36px); gap:5px; }}
-        .v-cell {{ width:36px; height:36px; border:1px solid #dcdcdc; border-radius:6px; display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:12px; color:#555; background:#fafafa; font-weight:500; }}
-        .v-marcada {{ background:linear-gradient(135deg, #2e7d32, #1b5e20) !important; color:#ffffff !important; border:2px solid #0b4317 !important; font-weight:bold; }}
-    </style>
-    <div class="volante-box">
-    """
-    if titulo:
-        grid_html += f"<p style='font-weight:700; font-size:15px; margin-bottom:10px; color:#1b5e20; text-align:center;'>{titulo}</p>"
-    grid_html += '<div class="volante-grid">'
-    for r in range(6):
-        for c in range(10):
-            num = r * 10 + c + 1
-            cls = "v-cell v-marcada" if num in marcadas else "v-cell"
-            grid_html += f'<div class="{cls}">{num:02d}</div>'
-    grid_html += "</div></div>"
-    st.markdown(grid_html, unsafe_allow_html=True)
 
 # ==============================================================================
 # 8. INTERFACE PRINCIPAL
 # ==============================================================================
 st.title("🍀 Mega-Sena: Laboratório & Fechamentos")
-st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos • Matriz 6x10 • Top 30 Elliott • Heatmap & Quadrantes.")
+st.caption(f"Análise Ativa: Últimos {qtd_analise} Concursos Reais • Matriz 6x10 • Top 30 Elliott • Linhas, Colunas, Moldura & Miolo.")
 
 tab_fechamento, tab_gerador, tab_conferir, tab_filtros, tab_hist, tab_volante = st.tabs([
     "🎯 Fechamentos & Funil",
     "🚀 Gerador de Apostas",
     "🎟️ Conferir Jogos (TXT)",
     "⚙️ Filtros & Estatísticas",
-    f"📜 Concursos ({qtd_analise}), Heatmap & Quadrantes",
+    f"📜 Concursos ({qtd_analise}), Linhas, Colunas & Heatmap",
     "🗺️ Volante Visual 6x10"
 ])
 
 hist_sets = [set(j) for j in historico_ativo]
 ult_set = set(historico_ativo[-1]) if historico_ativo else set()
+linhas_chaves = [f"Linha {i}" for i in range(1, 7)]
+colunas_chaves = [f"Coluna {i}" for i in range(1, 11)]
 diag_dir = [f"Diag Direita {i:02d}" for i in range(1, 11)]
 diag_esq = [f"Diag Esquerda {i:02d}" for i in range(1, 11)]
 
 # ==============================================================================
-# ABA: FECHAMENTO & FUNIL DE ELLIOTT (TOP 30)
+# ABA: FECHAMENTO & FUNIL DE ELLIOTT (TOP 30 MEGA-SENA)
 # ==============================================================================
 with tab_fechamento:
-    st.markdown("### 🔄 Ciclo das Dezenas (Coupon Collector)")
+    st.markdown("### 🔄 Ciclo das Dezenas (Coupon Collector - 60 Dezenas)")
     col_c1, col_c2, col_c3 = st.columns([1, 1, 3])
     col_c1.metric("Ciclo Vigente", f"#{ciclo_atual['numero_ciclo']}")
     col_c2.metric("Sorteios no Ciclo", f"{ciclo_atual['sorteios_no_ciclo']}")
     with col_c3:
-        st.write(f"**{ciclo_atual['qtd_faltantes']} Dezenas Faltantes para Fechar o Ciclo:**")
+        st.write(f"**{ciclo_atual['qtd_faltantes']} Dezenas Faltantes para Fechar o Ciclo da Mega-Sena:**")
         if ciclo_atual["faltantes"]:
             st.code(" ".join([f"{n:02d}" for n in ciclo_atual["faltantes"]]))
         else:
@@ -627,7 +742,7 @@ with tab_fechamento:
     st.text("\n".join(linhas_texto))
 
     st.divider()
-    st.subheader("2. As 30 Dezenas Ranqueadas pelo Funil de Elliott")
+    st.subheader("2. As 30 Dezenas Ranqueadas pelo Funil de Elliott (Top 30)")
     str_sugestao_30 = " ".join([f"{n:02d}" for n in top30_elliott])
     st.code(f"Top 30 Elliott: {str_sugestao_30}")
 
@@ -636,13 +751,9 @@ with tab_fechamento:
         df_funil.columns = ["Dezena", "Score Funil", "Total Saídas", "Saídas Recentes", "Momentum", "Atraso"]
         st.dataframe(df_funil, use_container_width=True)
 
-    # ==========================================================================
-    # 3. ESCOLHA DAS DEZENAS, DESDOBRAMENTO & RESULTADOS DA 3ª SEÇÃO
-    # ==========================================================================
+    # 3. ESCOLHA DAS DEZENAS & RESULTADOS NA 3ª SEÇÃO
     st.divider()
     st.subheader("3. Escolha das Dezenas & Depuração Direta")
-    st.caption("Gere os jogos por garantia matemática ou depure diretamente aplicando os filtros ativos:")
-
     c_fech1, c_fech2 = st.columns([3, 2])
     with c_fech1:
         entrada_manual = st.text_input(
@@ -652,7 +763,7 @@ with tab_fechamento:
         )
     with c_fech2:
         gar = st.selectbox(
-            "Método de Desdobramento / Garantia:",
+            "Método de Desdobramento / Garantia (Mega-Sena):",
             [
                 "Filtros Definidos (Apenas jogos 100% aprovados nas regras)",
                 "Quadra (Garante 4 se 6)",
@@ -667,7 +778,7 @@ with tab_fechamento:
     st.write(f"Dezenas selecionadas ({len(dezenas_digitadas)}): `{' - '.join([f'{n:02d}' for n in dezenas_digitadas])}`")
 
     if len(dezenas_digitadas) < 7:
-        st.info("Digite pelo menos 7 dezenas para calcular o desdobramento.")
+        st.info("Digite pelo menos 7 dezenas para calcular o desdobramento da Mega-Sena.")
     elif len(dezenas_digitadas) > 30:
         st.error(f"Você informou {len(dezenas_digitadas)} dezenas. O limite máximo é 30.")
     else:
@@ -703,9 +814,9 @@ with tab_fechamento:
                     st.session_state.tipo_execucao_sec3 = "filtros_diretos"
             else:
                 if len(dezenas_digitadas) > 20 and ("Quadra" in gar or "Quina" in gar):
-                    st.warning("⚠️ Com mais de 20 dezenas, o cálculo exato de matriz de cobertura pode ser demorado.")
-                with st.spinner("Processando fechamento matemático..."):
-                    j_fech, cob = gerar_fechamento_guloso(dezenas_digitadas, gar)
+                    st.warning("⚠️ Com muitas dezenas, o cálculo exato pode demorar alguns segundos.")
+                with st.spinner("Processando fechamento matemático da Mega-Sena..."):
+                    j_fech, cob = gerar_fechamento_guloso_megasena(dezenas_digitadas, gar)
                     st.session_state.jogos_fechamento = j_fech
                     st.session_state.jogos_fechamento_filtrados = []
                     st.session_state.taxa_cobertura = cob
@@ -717,14 +828,13 @@ with tab_fechamento:
         qtd_total = len(st.session_state.jogos_fechamento)
         tipo_exec = st.session_state.get("tipo_execucao_sec3", "garantia_pura")
         
-        st.markdown("#### 📊 Resultado da 3ª Seção:")
+        st.markdown("#### 📊 Resultado da 3ª Seção (Mega-Sena):")
         if tipo_exec == "filtros_diretos":
             testados = st.session_state.get('total_combinacoes_testadas', qtd_total)
-            st.success(f"🎯 **Depuração Concluída na 3ª Seção:** Das **{testados:,}** combinações geradas, **{qtd_total:,} jogos atenderam 100% dos filtros ativos**.")
+            st.success(f"🎯 **Depuração Concluída na 3ª Seção:** Das **{testados:,}** combinações testadas, **{qtd_total:,} jogos atenderam 100% dos filtros ativos**.")
         else:
             st.success(f"📦 **Desdobramento Concluído na 3ª Seção:** **{qtd_total:,} apostas geradas** com garantia de **{st.session_state.get('taxa_cobertura', 100):.1f}%**.")
 
-        # Download e listagem dentro da própria Seção 3
         st.download_button(
             "📥 Baixar Jogos da 3ª Seção (.TXT)",
             data=converter_para_txt(st.session_state.jogos_fechamento),
@@ -734,24 +844,20 @@ with tab_fechamento:
             use_container_width=True
         )
 
-        with st.expander(f"Ver Lista de Apostas Geradas na 3ª Seção ({qtd_total} jogos)", expanded=True):
+        with st.expander(f"Ver Lista de Apostas da Mega-Sena ({qtd_total} jogos)", expanded=True):
             for i, j in enumerate(st.session_state.jogos_fechamento[:100]):
-                st.code(f"Aposta #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])} | Soma: {sum(j)}")
+                renderizar_card_aposta_colorido(i + 1, j)
             if qtd_total > 100:
-                st.caption(f"Mostrando as primeiras 100 de {qtd_total} apostas geradas. Utilize o botão de download para obter o arquivo completo.")
+                st.caption(f"Mostrando as primeiras 100 de {qtd_total} apostas geradas. Baixe o arquivo TXT para ver a relação completa.")
 
-    # ==========================================================================
     # 4. RE-DEPURAÇÃO ADICIONAL & UPLOAD EXTERNO
-    # ==========================================================================
     st.divider()
     st.subheader("4. Re-depuração Adicional & Upload de Jogos")
-    st.caption("Passe uma lista externa ou re-filtre os jogos gerados na 3ª seção caso queira aplicar novas regras:")
-
     origem_depuracao = st.radio(
         "Selecione a fonte para re-depurar:",
         [
             "Apostas da 3ª Seção (Memória Atual)",
-            "📁 Fazer Upload de Arquivo .TXT (Jogos Externos)"
+            "📁 Fazer Upload de Arquivo .TXT (Jogos Externos da Mega-Sena)"
         ],
         horizontal=True
     )
@@ -761,7 +867,7 @@ with tab_fechamento:
 
     if "Upload" in origem_depuracao:
         arq_upload = st.file_uploader(
-            "Carregue o arquivo .TXT com apostas a refinar:",
+            "Carregue o arquivo .TXT com apostas de 6 dezenas para refinar:",
             type=["txt"],
             key="upload_jogos_pre_depurados"
         )
@@ -769,7 +875,7 @@ with tab_fechamento:
             conteudo_txt = arq_upload.getvalue().decode("utf-8", errors="ignore")
             base_para_filtrar = ler_arquivo_jogos_txt(conteudo_txt)
             if base_para_filtrar:
-                st.info(f"📂 **{len(base_para_filtrar):,} apostas** carregadas do arquivo.")
+                st.info(f"📂 **{len(base_para_filtrar):,} apostas da Mega-Sena** carregadas do arquivo.")
                 nome_origem = "Arquivo TXT"
             else:
                 st.error("Nenhuma aposta válida de 6 dezenas encontrada no arquivo.")
@@ -786,7 +892,7 @@ with tab_fechamento:
             regras_comp = obter_regras_compiladas()
             jogos_depurados = []
             
-            with st.spinner("Re-filtrando apostas..."):
+            with st.spinner("Re-filtrando apostas da Mega-Sena..."):
                 for c in base_para_filtrar:
                     if validar_jogo(c, set(c), regras_comp,
                                     st.session_state.filtro_soma_ativo, st.session_state.faixa_soma,
@@ -820,13 +926,13 @@ with tab_fechamento:
                 use_container_width=True
             )
             for i, j in enumerate(st.session_state.jogos_fechamento_filtrados[:100]):
-                st.code(f"Aposta #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])} | Soma: {sum(j)}")
+                renderizar_card_aposta_colorido(i + 1, j)
 
 # ==============================================================================
-# ABA: GERADOR DE APOSTAS
+# ABA: GERADOR DE APOSTAS (6 DEZENAS)
 # ==============================================================================
 with tab_gerador:
-    st.subheader("Gerar Combinações Validadas (6 Dezenas)")
+    st.subheader("Gerar Combinações Validadas da Mega-Sena (6 Dezenas)")
     qtd = st.number_input("Quantidade de Jogos:", min_value=1, max_value=200, value=5)
     
     if st.button("Gerar Apostas da Mega-Sena 🚀", use_container_width=True):
@@ -834,7 +940,7 @@ with tab_gerador:
         jogos, unicos, t = [], set(), 0
         pool = list(range(1, 61))
         
-        with st.spinner("Filtrando apostas segundo as regras..."):
+        with st.spinner("Filtrando apostas da Mega-Sena segundo as regras..."):
             while len(jogos) < qtd and t < 250_000:
                 c = sorted(random.sample(pool, 6))
                 ctup = tuple(c)
@@ -859,17 +965,17 @@ with tab_gerador:
     if st.session_state.jogos_aleatorios:
         st.success(f"{len(st.session_state.jogos_aleatorios)} jogos gerados:")
         st.download_button(
-            "Baixar Jogos em TXT",
+            "Baixar Jogos da Mega-Sena em TXT",
             data=converter_para_txt(st.session_state.jogos_aleatorios),
             file_name="apostas_megasena.txt",
             mime="text/plain",
             use_container_width=True
         )
         for i, j in enumerate(st.session_state.jogos_aleatorios):
-            st.code(f"Jogo #{i+1:02d}: {'  '.join([f'{n:02d}' for n in j])} | Soma: {sum(j)}")
+            renderizar_card_aposta_colorido(i + 1, j)
 
 # ==============================================================================
-# ABA: CONFERIR JOGOS (ARQUIVO .TXT)
+# ABA: CONFERIR JOGOS (ARQUIVO .TXT - MEGA-SENA)
 # ==============================================================================
 with tab_conferir:
     st.subheader("Conferência Oficial da Mega-Sena (.TXT)")
@@ -952,11 +1058,10 @@ with tab_conferir:
             elif qtd == 5: tag = "🎯 QUINA!"
             elif qtd == 4: tag = "🥈 QUADRA!"
 
-            jogo_str = " ".join([f"[{n:02d}]" if n in item["acertos"] else f"{n:02d}" for n in item["jogo"]])
-            st.write(f"Bilhete #{idx+1:02d}: {jogo_str} — **{tag}**")
+            renderizar_card_conferencia_colorido(idx + 1, item["jogo"], item["acertos"], tag, qtd)
 
 # ==============================================================================
-# ABA: FILTROS & ESTATÍSTICAS
+# ABA: FILTROS & ESTATÍSTICAS (SISTEMA PADRONIZADO: LINHAS, COLUNAS E DIAGONAIS)
 # ==============================================================================
 with tab_filtros:
     st.subheader(f"Filtros Calibrados nos Últimos {qtd_analise} Concursos (Mega-Sena)")
@@ -989,9 +1094,10 @@ with tab_filtros:
             st.slider("Top Quentes:", 0, 6, key="faixa_quentes")
             st.slider("Mais Atrasadas:", 0, 6, key="faixa_frias")
 
+    # Quadrantes
     st.divider()
-    st.markdown("### 📐 Filtro de Quadrantes 2x2 (Distribuição Multinomial)")
-    st.caption("Controla a dispersão nos 4 setores da cartela para evitar acúmulos improváveis.")
+    st.markdown("### 📐 Filtro de Quadrantes 3x5 (Mega-Sena)")
+    st.caption("Controla a dispersão nos 4 setores de 15 dezenas da cartela para evitar acúmulos improváveis.")
     cq1, cq2, cq3 = st.columns(3)
     with cq1:
         st.checkbox("Ativar Filtro de Quadrantes", key="filtro_quads_ativo")
@@ -1002,27 +1108,75 @@ with tab_filtros:
         if st.session_state.filtro_quads_ativo:
             st.slider("Mínimo de Quadrantes Presentes:", 1, 4, key="min_quadrantes", help="Exige que o jogo ocupe pelo menos X quadrantes distintos.")
 
+    # Moldura, Miolo, Pares, Ímpares e Primos
     st.divider()
     st.write("Padrões da Matriz (Mega-Sena):")
-    for padrao in ["Pares", "Primos", "Moldura", "Centro (Miolo)"]:
+    for padrao in ["Moldura", "Centro (Miolo)", "Pares", "Ímpares", "Primos"]:
         s_g = stats["stats_grupos"][padrao]
         chk, sl = st.columns([2, 3])
         with chk:
-            st.checkbox(f"{padrao} (Min: {s_g['min']} | Max: {s_g['max']})", key=f"ativo_{padrao}")
+            st.checkbox(f"{padrao} (Saídas: {s_g['total_saidas']})", key=f"ativo_{padrao}")
         with sl:
             if st.session_state.get(f"ativo_{padrao}", False):
-                st.slider(f"Faixa {padrao}", 0, 6, key=f"faixa_{padrao}")
+                st.slider(f"Faixa {padrao}", 0, 6, key=f"faixa_{padrao}", label_visibility="collapsed")
 
+    # 6 Linhas da Matriz (Mesmo Sistema das Diagonais)
+    st.divider()
+    st.write("6 Linhas (Matriz 6x10):")
+    cl_btn1, cl_btn2 = st.columns(2)
+    with cl_btn1:
+        if st.button("Ativar 6 Linhas", use_container_width=True):
+            for k in linhas_chaves: st.session_state[f"ativo_{k}"] = True
+            st.rerun()
+    with cl_btn2:
+        if st.button("Desativar Todas as Linhas", use_container_width=True):
+            for k in linhas_chaves: st.session_state[f"ativo_{k}"] = False
+            st.rerun()
+
+    with st.expander("6 Linhas da Matriz"):
+        for k in linhas_chaves:
+            s_d = stats["stats_grupos"][k]
+            chk, sl = st.columns([2, 3])
+            with chk:
+                st.checkbox(f"{k} (Saídas: {s_d['total_saidas']})", key=f"ativo_{k}")
+            with sl:
+                if st.session_state.get(f"ativo_{k}", False):
+                    st.slider(f"Faixa {k}", 0, 6, key=f"faixa_{k}", label_visibility="collapsed")
+
+    # 10 Colunas da Matriz (Mesmo Sistema das Diagonais)
+    st.divider()
+    st.write("10 Colunas (Matriz 6x10):")
+    cc_btn1, cc_btn2 = st.columns(2)
+    with cc_btn1:
+        if st.button("Ativar 10 Colunas", use_container_width=True):
+            for k in colunas_chaves: st.session_state[f"ativo_{k}"] = True
+            st.rerun()
+    with cc_btn2:
+        if st.button("Desativar Todas as Colunas", use_container_width=True):
+            for k in colunas_chaves: st.session_state[f"ativo_{k}"] = False
+            st.rerun()
+
+    with st.expander("10 Colunas da Matriz"):
+        for k in colunas_chaves:
+            s_d = stats["stats_grupos"][k]
+            chk, sl = st.columns([2, 3])
+            with chk:
+                st.checkbox(f"{k} (Saídas: {s_d['total_saidas']})", key=f"ativo_{k}")
+            with sl:
+                if st.session_state.get(f"ativo_{k}", False):
+                    st.slider(f"Faixa {k}", 0, 6, key=f"faixa_{k}", label_visibility="collapsed")
+
+    # 20 Diagonais Cilíndricas (Mesmo Sistema)
     st.divider()
     st.write("20 Diagonais Cilíndricas (Matriz 6x10):")
-    c_btn1, c_btn2 = st.columns(2)
-    with c_btn1:
+    cd_btn1, cd_btn2 = st.columns(2)
+    with cd_btn1:
         if st.button("Ativar 20 Diagonais", use_container_width=True):
             for i in range(1, 11):
                 st.session_state[f"ativo_Diag Direita {i:02d}"] = True
                 st.session_state[f"ativo_Diag Esquerda {i:02d}"] = True
             st.rerun()
-    with c_btn2:
+    with cd_btn2:
         if st.button("Desativar Todas as Diagonais", use_container_width=True):
             for i in range(1, 11):
                 st.session_state[f"ativo_Diag Direita {i:02d}"] = False
@@ -1050,12 +1204,12 @@ with tab_filtros:
                     st.slider(f"Faixa {k}", 0, 6, key=f"faixa_{k}", label_visibility="collapsed")
 
 # ==============================================================================
-# ABA: HISTÓRICO, HEATMAP, QUADRANTES & DIAGONAIS
+# ABA: HISTÓRICO, LINHAS, COLUNAS, MOLDURA/MIOLO & HEATMAP
 # ==============================================================================
 with tab_hist:
-    st.subheader("🔥 Mapa de Calor Térmico (Heatmap 6x10)")
-    st.caption(f"Frequência absoluta das dezenas no recorte dos últimos {qtd_analise} sorteios:")
-    renderizar_heatmap_6x10(stats["cnt_dezenas"], titulo=f"Heatmap das 60 Dezenas — Últimos {qtd_analise} Concursos")
+    st.subheader("🔥 Mapa de Calor Térmico da Mega-Sena (Heatmap 6x10)")
+    st.caption(f"Frequência absoluta das 60 dezenas no recorte dos últimos {qtd_analise} sorteios:")
+    renderizar_heatmap_6x10_vibrante(stats["cnt_dezenas"], titulo=f"Heatmap das 60 Dezenas — Últimos {qtd_analise} Concursos")
 
     st.divider()
     st.subheader(f"Últimos {qtd_analise} Concursos Analisados")
@@ -1065,15 +1219,65 @@ with tab_hist:
             {"Concurso": f"#{len(historico_ativo)-idx:02d}", "Dezenas": " - ".join([f"{n:02d}" for n in s]), "Soma": sum(s)}
             for idx, s in enumerate(reversed(historico_ativo))
         ]
-        st.dataframe(pd.DataFrame(dados_tabela), use_container_width=True, height=350)
+        st.dataframe(pd.DataFrame(dados_tabela), use_container_width=True, height=300)
     with c_h2:
         top_10 = [(d, stats["cnt_dezenas"][d]) for d in stats["ordenados_freq"][:10]]
         st.write("**Top 10 Quentes:** " + ", ".join([f"{d:02d} ({qtd}x)" for d, qtd in top_10]))
         bot_10 = sorted(stats["cnt_dezenas"].items(), key=lambda x: x[1])[:10]
         st.write("**Top 10 Frias:** " + ", ".join([f"{d:02d} ({qtd}x)" for d, qtd in bot_10]))
 
+    # Painel Moldura vs. Miolo
     st.divider()
-    st.subheader("Mapeamento dos 4 Quadrantes (3x5)")
+    st.subheader("🖼️ Desempenho: Moldura (28 dezenas) vs. Miolo (32 dezenas)")
+    col_mold, col_miolo = st.columns(2)
+    s_mold = stats["stats_grupos"]["Moldura"]
+    s_miolo = stats["stats_grupos"]["Centro (Miolo)"]
+    with col_mold:
+        st.metric("Moldura (Perímetro Externo)", f"{s_mold['total_saidas']} saídas", f"Média: {s_mold['media']:.2f}")
+        st.caption(f"Variação: Mínimo {s_mold['min']} | Máximo {s_mold['max']} dezenas.")
+    with col_miolo:
+        st.metric("Miolo (Centro Interno)", f"{s_miolo['total_saidas']} saídas", f"Média: {s_miolo['media']:.2f}")
+        st.caption(f"Variação: Mínimo {s_miolo['min']} | Máximo {s_miolo['max']} dezenas.")
+
+    # Tabela 6 Linhas
+    st.divider()
+    st.subheader("📏 Estatísticas Individuais das 6 Linhas (Mega-Sena)")
+    dados_linhas = []
+    for k in linhas_chaves:
+        info = stats["stats_grupos"][k]
+        dados_linhas.append({
+            "Linha": k,
+            "Total Saídas": info["total_saidas"],
+            "Média por Jogo": f"{info['media']:.2f}",
+            "Mín": info["min"],
+            "Máx": info["max"],
+            "Dezenas": " ".join([f"{n:02d}" for n in info["dezenas"]]),
+            "Filtro Ativo": "Sim" if st.session_state.get(f"ativo_{k}", False) else "Não"
+        })
+    df_linhas = pd.DataFrame(dados_linhas).sort_values(by="Total Saídas", ascending=False)
+    st.dataframe(df_linhas, use_container_width=True, height=270)
+
+    # Tabela 10 Colunas
+    st.divider()
+    st.subheader("📐 Estatísticas Individuais das 10 Colunas (Mega-Sena)")
+    dados_colunas = []
+    for k in colunas_chaves:
+        info = stats["stats_grupos"][k]
+        dados_colunas.append({
+            "Coluna": k,
+            "Total Saídas": info["total_saidas"],
+            "Média por Jogo": f"{info['media']:.2f}",
+            "Mín": info["min"],
+            "Máx": info["max"],
+            "Dezenas": " ".join([f"{n:02d}" for n in info["dezenas"]]),
+            "Filtro Ativo": "Sim" if st.session_state.get(f"ativo_{k}", False) else "Não"
+        })
+    df_colunas = pd.DataFrame(dados_colunas).sort_values(by="Total Saídas", ascending=False)
+    st.dataframe(df_colunas, use_container_width=True, height=360)
+
+    # 4 Quadrantes e 20 Diagonais
+    st.divider()
+    st.subheader("Mapeamento dos 4 Quadrantes (3x5 - 15 Dezenas Cada)")
     col_q1, col_q2, col_q3, col_q4 = st.columns(4)
     for idx_q, (nome_q, dezenas_q) in enumerate(mapa_quadrantes.items()):
         total_saidas_quad = sum(stats["cnt_dezenas"][d] for d in dezenas_q)
@@ -1100,7 +1304,7 @@ with tab_hist:
     st.dataframe(df_diags, use_container_width=True, height=400)
 
 # ==============================================================================
-# ABA: VOLANTE VISUAL (6x10)
+# ABA: VOLANTE VISUAL (6x10 EM VERDE MEGA-SENA)
 # ==============================================================================
 with tab_volante:
     st.subheader("Visualizador da Cartela Oficial da Mega-Sena (6x10)")
