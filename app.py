@@ -202,7 +202,6 @@ def calcular_ciclo_dezenas(historico_completo):
 def calcular_funil_elliott(historico_fatia):
     total_jogos = len(historico_fatia)
     
-    # Tratamento para quando houver apenas 1 concurso selecionado
     if total_jogos == 1:
         jogos_antigos = []
         jogos_recentes = historico_fatia
@@ -315,7 +314,7 @@ def calcular_estatisticas_dinamicas(historico_fatia, grupos_base):
     }
 
 # ==============================================================================
-# 4. RENDERIZADORES EM IFRAME (HTML ISOLADO: HEATMAP & VOLANTE)
+# 4. RENDERIZADORES EM IFRAME (HTML ISOLADO COM PROTEÇÃO DE CORES)
 # ==============================================================================
 def renderizar_heatmap_6x10_vibrante(cnt_dezenas, titulo="Mapa de Calor Térmico da Mega-Sena (60 Dezenas)"):
     todos_valores = [cnt_dezenas[n] for n in range(1, 61)]
@@ -345,7 +344,7 @@ def renderizar_heatmap_6x10_vibrante(cnt_dezenas, titulo="Mapa de Calor Térmico
             f = cnt_dezenas[num]
             bg, text_color = obter_estilo_calor(f)
             celulas_html += f"""
-            <div style="width:50px; height:50px; background:{bg}; color:{text_color}; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:monospace; border:1px solid rgba(0,0,0,0.12); box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+            <div style="width:50px; height:50px; background:{bg}; color:{text_color}; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:monospace; border:1px solid rgba(0,0,0,0.12); box-shadow:0 1px 3px rgba(0,0,0,0.06); box-sizing:border-box;">
                 <span style="font-size:16px; font-weight:900; line-height:1.1;">{num:02d}</span>
                 <span style="font-size:11px; font-weight:800; opacity:0.95;">{f}x</span>
             </div>
@@ -357,7 +356,8 @@ def renderizar_heatmap_6x10_vibrante(cnt_dezenas, titulo="Mapa de Calor Térmico
     <head>
       <meta charset="utf-8">
       <style>
-        body {{ margin: 0; padding: 0; background: transparent; font-family: sans-serif; display: flex; justify-content: center; }}
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; color: #0f172a; }}
         .heat-wrapper {{
             background: #ffffff;
             border: 2px solid #cbd5e1;
@@ -376,13 +376,13 @@ def renderizar_heatmap_6x10_vibrante(cnt_dezenas, titulo="Mapa de Calor Térmico
     </head>
     <body>
       <div class="heat-wrapper">
-        <div style="font-size:17px; font-weight:800; color:#15803d; text-align:center; margin-bottom:14px; font-family:sans-serif;">
+        <div style="font-size:17px; font-weight:800; color:#15803d; text-align:center; margin-bottom:14px;">
             {titulo}
         </div>
         <div class="heat-grid">
             {celulas_html}
         </div>
-        <div style="display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:16px; font-size:12px; font-weight:700;">
+        <div style="display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:16px; font-size:12px; font-weight:700; color:#1e293b;">
             <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#dbeafe; border:1px solid #cbd5e1; display:inline-block;"></span> ❄️ Frias ({val_min}x)</div>
             <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#38bdf8; display:inline-block;"></span> 💧 Baixas</div>
             <div style="display:flex; align-items:center; gap:4px; background:#f8fafc; padding:4px 9px; border-radius:6px; border:1px solid #e2e8f0;"><span style="width:13px; height:13px; border-radius:3px; background:#22c55e; display:inline-block;"></span> 🌿 Médias</div>
@@ -459,7 +459,7 @@ def renderizar_volante_6x10(jogo, titulo=""):
                 border = "1px solid #cbd5e1"
                 weight = "600"
             celulas_html += f"""
-            <div style="width:38px; height:38px; background:{bg}; color:{color}; border:{border}; font-weight:{weight}; border-radius:8px; display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:13px;">
+            <div style="width:38px; height:38px; background:{bg}; color:{color}; border:{border}; font-weight:{weight}; border-radius:8px; display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:13px; box-sizing:border-box;">
                 {num:02d}
             </div>
             """
@@ -470,7 +470,8 @@ def renderizar_volante_6x10(jogo, titulo=""):
     <head>
       <meta charset="utf-8">
       <style>
-        body {{ margin:0; padding:0; background:transparent; display:flex; justify-content:center; font-family:sans-serif; }}
+        * {{ box-sizing: border-box; }}
+        body {{ margin:0; padding:0; background:transparent; display:flex; justify-content:center; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color:#0f172a; }}
         .volante-box {{
             background: #ffffff;
             border: 2px solid #16a34a;
@@ -565,7 +566,6 @@ with st.sidebar:
     
     st.info(f"🌐 **Fonte:** {st.session_state.get('origem_dados', 'Caixa Oficial')}")
     
-    # PERMITE DE 1 CONCURSO EM DIANTE
     qtd_analise = st.slider(
         "Quantidade de Concursos:",
         min_value=1,
@@ -603,7 +603,6 @@ ciclo_atual = calcular_ciclo_dezenas(st.session_state.historico_sorteios)
 mapa_quadrantes = get_quadrantes_megasena()
 quads_sets = {k: set(v) for k, v in mapa_quadrantes.items()}
 
-# FINGERPRINT
 fingerprint_atual = (qtd_analise, len(st.session_state.historico_sorteios), tuple(historico_ativo[-1]) if historico_ativo else ())
 
 if "historico_fingerprint" not in st.session_state:
@@ -758,7 +757,6 @@ with tab_fechamento:
         df_funil.columns = ["Dezena", "Score Funil", "Total Saídas", "Saídas Recentes", "Momentum", "Atraso"]
         st.dataframe(df_funil, use_container_width=True)
 
-    # 3. ESCOLHA DAS DEZENAS & RESULTADOS NA 3ª SEÇÃO
     st.divider()
     st.subheader("3. Escolha das Dezenas & Depuração Direta")
     c_fech1, c_fech2 = st.columns([3, 2])
@@ -830,7 +828,6 @@ with tab_fechamento:
                     st.session_state.total_combinacoes_testadas = None
                     st.session_state.tipo_execucao_sec3 = "garantia_pura"
 
-    # EXIBIÇÃO DIRETA DOS RESULTADOS DA 3ª SEÇÃO
     if st.session_state.jogos_fechamento:
         qtd_total = len(st.session_state.jogos_fechamento)
         tipo_exec = st.session_state.get("tipo_execucao_sec3", "garantia_pura")
